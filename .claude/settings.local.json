@@ -22,7 +22,9 @@
       "Bash(echo \"PID: $!\")",
       "Bash(curl -s http://localhost:5173)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
-      "Bash(jobs)"
+      "Bash(jobs)",
+      "Bash(npx tsc *)",
+      "Bash(/Users/om/Library/Caches/JetBrains/acp-agents/.runtimes/node/24.13.0/bin/node ./node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

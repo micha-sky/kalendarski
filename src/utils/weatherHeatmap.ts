@@ -201,6 +201,85 @@ export function temperatureToRgba(temperature: number, isNight: boolean, opacity
   return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
+// High-contrast palette: deep blue → sky → emerald → amber → orange → crimson
+const ENHANCED_PALETTE = ['#1e3a8a', '#0ea5e9', '#10b981', '#fbbf24', '#f97316', '#dc2626'] as const;
+// Near-black navy used for deep night
+const NIGHT_HEX = '#0f172a';
+
+function hexToRgba(hex: string, opacity: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity.toFixed(2)})`;
+}
+
+function samplePalette(palette: readonly string[], t: number): string {
+  const n = palette.length - 1;
+  const i = Math.min(Math.floor(t * n), n - 1);
+  return interpolateColor(palette[i], palette[i + 1], (t * n) - i);
+}
+
+// Returns 0 at deep night, 1 during full day, smooth 1.5h ramp at dawn/dusk
+function smoothDayFactor(hour: number, sunriseHour: number, sunsetHour: number): number {
+  const RAMP = 1.5;
+  if (hour >= sunriseHour + RAMP && hour <= sunsetHour - RAMP) return 1;
+  if (hour <= sunriseHour - RAMP || hour >= sunsetHour + RAMP) return 0;
+  if (hour < sunriseHour + RAMP)
+    return Math.max(0, (hour - (sunriseHour - RAMP)) / (2 * RAMP));
+  return Math.max(0, 1 - (hour - (sunsetHour - RAMP)) / (2 * RAMP));
+}
+
+/**
+ * High-contrast per-hour color.
+ * - Normalises temperature to the day's own min/max so the full palette always spans the day.
+ * - Blends towards near-black navy at night, with a smooth dawn/dusk ramp.
+ * - Opacity is highest at night (0.55) and lowest at midday (0.37).
+ */
+export function temperatureToRgbaEnhanced(
+  temp: number,
+  hour: number,
+  sunriseHour: number,
+  sunsetHour: number,
+  dayTempMin: number,
+  dayTempMax: number,
+): string {
+  const span = Math.max(dayTempMax - dayTempMin, 3);
+  const norm = Math.max(0, Math.min(1, (temp - dayTempMin) / span));
+
+  const tempHex  = samplePalette(ENHANCED_PALETTE, norm);
+  const dayFactor = smoothDayFactor(hour, sunriseHour, sunsetHour);
+  const finalHex  = interpolateColor(NIGHT_HEX, tempHex, dayFactor);
+
+  // More opaque at night so the darkness really reads
+  const opacity = 0.55 - dayFactor * 0.18;
+  return hexToRgba(finalHex, opacity);
+}
+
+/**
+ * High-contrast day-level color for month view.
+ * Uses daytime-only average and normalises against the full visible period's range
+ * so cold days are clearly blue and warm days clearly red across the whole month.
+ */
+export function daytimeColorFromRange(
+  hourlyTemps: (number | null)[],
+  sunriseHour: number,
+  sunsetHour: number,
+  periodMin: number,
+  periodMax: number,
+): string | undefined {
+  const dayHours = hourlyTemps
+    .map((t, h) => (t != null && h >= sunriseHour && h <= sunsetHour ? t : null))
+    .filter((t): t is number => t != null);
+  if (!dayHours.length) return undefined;
+
+  const avg = dayHours.reduce((a, b) => a + b, 0) / dayHours.length;
+  const span = Math.max(periodMax - periodMin, 3);
+  const norm = Math.max(0, Math.min(1, (avg - periodMin) / span));
+
+  return hexToRgba(samplePalette(ENHANCED_PALETTE, norm), 0.48);
+}
+
 /**
  * Interpolates temperature for a given hour using a day's min/max.
  * Coldest at ~6am, hottest at ~3pm, piecewise linear.

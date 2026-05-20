@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isToday, addDays, isBefore } from 'date-fns';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import type { CalendarEvent, CalendarViewState, WeatherHeatmapData, WeatherForecast, DayCacheEntry } from '../types';
 import { clsx } from 'clsx';
-import { temperatureToRgba, interpolateDailyTemp } from '../utils/weatherHeatmap';
+import { temperatureToRgba, interpolateDailyTemp, temperatureToRgbaEnhanced, daytimeColorFromRange } from '../utils/weatherHeatmap';
 
 interface CalendarProps {
   events: CalendarEvent[];
@@ -34,6 +34,26 @@ const Calendar: React.FC<CalendarProps> = ({
 }) => {
   const [hoveredDate, setHoveredDate] = useState<Date | null>(null);
 
+  // Period-wide temp range (for month-view cross-day normalization)
+  const { periodMin, periodMax } = useMemo(() => {
+    if (!dayWeatherCache || Object.keys(dayWeatherCache).length === 0) {
+      return { periodMin: 0, periodMax: 30 };
+    }
+    let min = Infinity, max = -Infinity;
+    for (const entry of Object.values(dayWeatherCache)) {
+      for (const t of entry.hourlyTemps) {
+        if (t != null) {
+          if (t < min) min = t;
+          if (t > max) max = t;
+        }
+      }
+    }
+    return {
+      periodMin: isFinite(min) ? min : 0,
+      periodMax: isFinite(max) ? max : 30,
+    };
+  }, [dayWeatherCache]);
+
   // Returns an rgba background color for a given day (+ optional hour).
   // Prefers the Open-Meteo day cache (full history + forecast), falls back to OWM data.
   const getCellColor = (day: Date, hour?: number): string | undefined => {
@@ -42,12 +62,16 @@ const Calendar: React.FC<CalendarProps> = ({
     // --- Primary: Open-Meteo day cache (covers past + future for any date) ---
     const cacheEntry = dayWeatherCache?.[dayKey];
     if (cacheEntry) {
-      const isNight = (h: number) => h < cacheEntry.sunriseHour || h > cacheEntry.sunsetHour;
+      const validTemps = cacheEntry.hourlyTemps.filter((t): t is number => t != null);
+      const dayMin = validTemps.length ? Math.min(...validTemps) : 0;
+      const dayMax = validTemps.length ? Math.max(...validTemps) : 30;
 
       if (hour !== undefined) {
         const temp = cacheEntry.hourlyTemps[hour];
-        if (temp != null) return temperatureToRgba(temp, isNight(hour), 0.28);
-        // Null slot (future hour not yet modelled) — interpolate from neighbours
+        if (temp != null) {
+          return temperatureToRgbaEnhanced(temp, hour, cacheEntry.sunriseHour, cacheEntry.sunsetHour, dayMin, dayMax);
+        }
+        // Null slot — interpolate from neighbours
         const filled = cacheEntry.hourlyTemps
           .map((t, i) => (t != null ? { h: i, t } : null))
           .filter(Boolean) as { h: number; t: number }[];
@@ -55,15 +79,12 @@ const Calendar: React.FC<CalendarProps> = ({
           const before = [...filled].reverse().find(p => p.h <= hour) ?? filled[0];
           const after  = filled.find(p => p.h > hour) ?? filled[filled.length - 1];
           const factor = before === after ? 0 : (hour - before.h) / (after.h - before.h);
-          return temperatureToRgba(before.t + factor * (after.t - before.t), isNight(hour), 0.28);
+          const interp = before.t + factor * (after.t - before.t);
+          return temperatureToRgbaEnhanced(interp, hour, cacheEntry.sunriseHour, cacheEntry.sunsetHour, dayMin, dayMax);
         }
       } else {
-        // Day-level: average of valid hourly readings
-        const valid = cacheEntry.hourlyTemps.filter((t): t is number => t != null);
-        if (valid.length) {
-          const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
-          return temperatureToRgba(avg, false, 0.22);
-        }
+        // Day-level (month view): daytime average normalized against period range
+        return daytimeColorFromRange(cacheEntry.hourlyTemps, cacheEntry.sunriseHour, cacheEntry.sunsetHour, periodMin, periodMax);
       }
     }
 
