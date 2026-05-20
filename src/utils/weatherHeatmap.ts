@@ -191,6 +191,33 @@ function getTemperatureColor(temperature: number, isNight: boolean): string {
 }
 
 /**
+ * Converts a temperature to an rgba CSS color string.
+ */
+export function temperatureToRgba(temperature: number, isNight: boolean, opacity: number): string {
+  const hex = getTemperatureColor(temperature, isNight).replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+/**
+ * Interpolates temperature for a given hour using a day's min/max.
+ * Coldest at ~6am, hottest at ~3pm, piecewise linear.
+ */
+export function interpolateDailyTemp(hour: number, tempMin: number, tempMax: number): number {
+  const minHour = 6;
+  const maxHour = 15;
+  const periodUp = maxHour - minHour;       // 9h rising
+  const periodDown = 24 - periodUp;         // 15h falling
+  const phase = ((hour - minHour) + 24) % 24;
+  const t = phase <= periodUp
+    ? phase / periodUp
+    : 1 - (phase - periodUp) / periodDown;
+  return tempMin + t * (tempMax - tempMin);
+}
+
+/**
  * Calculates opacity based on cloud cover and time of day with enhanced contrast
  */
 function calculateOpacity(cloudCover: number, isNight: boolean, enhanceContrast: boolean = false): number {
@@ -388,17 +415,7 @@ export function generateEnhancedWeatherHeatmap(
   const temperatures = hourlyData.map(data => data.temperature);
   const tempRanges = calculateDynamicTempRanges(temperatures);
 
-  // For very narrow ranges, apply additional contrast enhancement
   const isNarrowRange = tempRanges.range < minContrastThreshold;
-
-  console.log(`🌡️ Temperature Analysis:`, {
-    range: `${tempRanges.min.toFixed(1)}°C to ${tempRanges.max.toFixed(1)}°C`,
-    span: `${tempRanges.range.toFixed(1)}°C`,
-    isNarrow: isNarrowRange,
-    enhancement: enhanceNarrowRanges && isNarrowRange ? '🎨 EXTREME CONTRAST ACTIVE' : '📊 STANDARD MAPPING',
-    segments: tempRanges.segments.length,
-    contrastMultiplier: enhanceNarrowRanges && isNarrowRange ? contrastMultiplier : 1.0
-  });
 
   return hourlyData.map((data) => {
     const hour = new Date(data.timestamp * 1000).getHours();

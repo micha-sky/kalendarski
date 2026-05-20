@@ -4,7 +4,6 @@ import Calendar from './Calendar';
 import WeatherHeatmapBackground from './WeatherHeatmapBackground';
 import Sidebar from './Sidebar';
 import EventModal from './EventModal';
-import TemperatureGradientDemo from './TemperatureGradientDemo';
 import type {CalendarEvent} from '../types';
 import { generateWeatherHeatmap } from '../utils/weatherHeatmap';
 
@@ -26,7 +25,7 @@ const MainLayout: React.FC = () => {
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [eventModalDate, setEventModalDate] = useState<Date | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [showDemo, setShowDemo] = useState(false);
+  const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
 
   // Generate weather heatmap data
   const weatherHeatmap = weatherData?.hourly && weatherData?.daily?.[0] 
@@ -75,32 +74,12 @@ const MainLayout: React.FC = () => {
     setEventModalDate(null);
   };
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full mx-4">
-          <div className="text-red-600 text-center mb-4">
-            <svg className="w-12 h-12 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 15.5c-.77.833.192 2.5 1.732 2.5z" />
-            </svg>
-            <h2 className="text-xl font-semibold mb-2">Application Error</h2>
-            <p className="text-gray-600 mb-4">{error.message}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Reload Application
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const showWeatherError = error?.code === 'WEATHER_FETCH_ERROR' && !weatherErrorDismissed;
 
   return (
     <div className="min-h-screen bg-gray-50 relative overflow-hidden">
       {/* Weather Heatmap Background */}
-      <WeatherHeatmapBackground 
+      <WeatherHeatmapBackground
         heatmapData={weatherHeatmap}
         weatherData={weatherData}
       />
@@ -109,7 +88,7 @@ const MainLayout: React.FC = () => {
       <div className="relative z-10 min-h-screen">
         <div className="flex h-screen">
           {/* Sidebar */}
-          <Sidebar 
+          <Sidebar
             isOpen={isSidebarOpen}
             onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
           />
@@ -125,7 +104,7 @@ const MainLayout: React.FC = () => {
                   <h1 className="text-2xl font-bold text-gray-900">Kalendarski</h1>
                   {weatherData?.location && (
                     <div className="text-sm text-gray-600">
-                      {weatherData.location.city && weatherData.location.country 
+                      {weatherData.location.city && weatherData.location.country
                         ? `${weatherData.location.city}, ${weatherData.location.country}`
                         : `${weatherData.location.latitude.toFixed(2)}, ${weatherData.location.longitude.toFixed(2)}`
                       }
@@ -133,59 +112,69 @@ const MainLayout: React.FC = () => {
                   )}
                 </div>
 
-                <div className="flex items-center space-x-4">
-                  {/* Demo Toggle Button */}
-                  <button
-                    onClick={() => setShowDemo(!showDemo)}
-                    className="px-3 py-1 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
-                  >
-                    {showDemo ? 'Hide' : 'Show'} Gradient Demo
-                  </button>
-
-                  {/* Weather info */}
-                  {weatherData?.current && (
-                    <div className="flex items-center space-x-4 text-sm text-gray-600">
-                      <div className="flex items-center space-x-2">
-                        <img
-                          src={`https://openweathermap.org/img/wn/${weatherData.current.icon}@2x.png`}
-                          alt={weatherData.current.condition.description}
-                          className="w-8 h-8"
-                        />
-                        <span>{Math.round(weatherData.current.temperature)}°C</span>
-                      </div>
-                      <div className="text-xs">
-                        {weatherData.current.condition.description}
-                      </div>
+                {/* Weather info */}
+                {weatherData?.current && (
+                  <div className="flex items-center space-x-4 text-sm text-gray-600">
+                    <div className="flex items-center space-x-2">
+                      <img
+                        src={`https://openweathermap.org/img/wn/${weatherData.current.icon}@2x.png`}
+                        alt={weatherData.current.condition.description}
+                        className="w-8 h-8"
+                      />
+                      <span>{Math.round(weatherData.current.temperature)}°C</span>
                     </div>
-                  )}
-                </div>
+                    <div className="text-xs">
+                      {weatherData.current.condition.description}
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading indicator for weather refresh */}
+                {isLoading && !weatherData && (
+                  <div className="flex items-center space-x-2 text-sm text-gray-500">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
+                    <span>Loading weather…</span>
+                  </div>
+                )}
               </div>
             </header>
 
+            {/* Weather error banner */}
+            {showWeatherError && (
+              <div className="flex items-center justify-between px-6 py-3 bg-amber-50 border-b border-amber-200 text-sm text-amber-800">
+                <span>{error!.message}</span>
+                <div className="flex items-center space-x-3 ml-4 flex-shrink-0">
+                  <button
+                    onClick={() => { setWeatherErrorDismissed(false); refreshWeatherData(); }}
+                    className="font-medium underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => setWeatherErrorDismissed(true)}
+                    className="text-amber-600 hover:text-amber-800"
+                    aria-label="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Calendar Content */}
             <div className="flex-1 p-6 overflow-auto">
-              {showDemo ? (
-                <TemperatureGradientDemo />
-              ) : isLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Loading calendar...</p>
-                  </div>
-                </div>
-              ) : (
-                <Calendar
-                  events={events}
-                  viewState={viewState}
-                  onViewStateChange={setViewState}
-                  onEventClick={handleEventClick}
-                  onDateClick={handleDateClick}
-                  onCreateEvent={handleCreateEvent}
-                  weatherHeatmap={weatherHeatmap}
-                  onRefreshWeather={refreshWeatherData}
-                  className="h-full"
-                />
-              )}
+              <Calendar
+                events={events}
+                viewState={viewState}
+                onViewStateChange={setViewState}
+                onEventClick={handleEventClick}
+                onDateClick={handleDateClick}
+                onCreateEvent={handleCreateEvent}
+                weatherHeatmap={weatherHeatmap}
+                weatherData={weatherData}
+                onRefreshWeather={refreshWeatherData}
+                className="h-full"
+              />
             </div>
           </main>
         </div>

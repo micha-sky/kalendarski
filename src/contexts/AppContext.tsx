@@ -3,6 +3,41 @@ import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError } from '../types';
 import { getWeatherData } from '../services/weatherService';
 
+const STORAGE_KEYS = {
+  events: 'kalendarski_events',
+  calendars: 'kalendarski_calendars',
+} as const;
+
+const DATE_FIELDS_EVENT = ['start', 'end', 'createdAt', 'updatedAt'] as const;
+const DATE_FIELDS_CALENDAR = ['createdAt', 'updatedAt', 'lastSync'] as const;
+
+function reviveEvent(raw: Record<string, unknown>): CalendarEvent {
+  const obj = { ...raw } as Record<string, unknown>;
+  for (const field of DATE_FIELDS_EVENT) {
+    if (typeof obj[field] === 'string') obj[field] = new Date(obj[field] as string);
+  }
+  return obj as unknown as CalendarEvent;
+}
+
+function reviveCalendar(raw: Record<string, unknown>): Calendar {
+  const obj = { ...raw } as Record<string, unknown>;
+  for (const field of DATE_FIELDS_CALENDAR) {
+    if (typeof obj[field] === 'string') obj[field] = new Date(obj[field] as string);
+  }
+  return obj as unknown as Calendar;
+}
+
+function loadFromStorage<T>(key: string, revive: (r: Record<string, unknown>) => T): T[] | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>[];
+    return parsed.map(revive);
+  } catch {
+    return null;
+  }
+}
+
 // Initial state
 const initialViewState: CalendarViewState = {
   currentDate: new Date(),
@@ -214,56 +249,93 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     dispatch({ type: 'SET_VIEW_STATE', payload: viewState });
   };
 
+  // Persist events and calendars to localStorage on every change
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.events, JSON.stringify(state.events));
+    } catch { /* ignore quota errors */ }
+  }, [state.events]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.calendars, JSON.stringify(state.calendars));
+    } catch { /* ignore quota errors */ }
+  }, [state.calendars]);
+
   // Initialize app data
   useEffect(() => {
     const initializeApp = async () => {
-      // Create default personal calendar
-      const defaultCalendar: Calendar = {
-        id: 'default',
-        name: 'Personal',
-        color: '#3b82f6',
-        description: 'Your personal calendar',
-        isVisible: true,
-        isReadOnly: false,
-        type: 'personal',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      
-      dispatch({ type: 'SET_CALENDARS', payload: [defaultCalendar] });
-
-      // Add some sample events
-      const sampleEvents: CalendarEvent[] = [
-        {
-          id: 'sample-1',
-          title: 'Welcome to Kalendarski!',
-          description: 'This is a sample event to get you started.',
-          start: new Date(),
-          end: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
-          allDay: false,
-          calendarId: 'default',
+      // Load calendars from storage or seed default
+      const storedCalendars = loadFromStorage(STORAGE_KEYS.calendars, reviveCalendar);
+      if (storedCalendars && storedCalendars.length > 0) {
+        dispatch({ type: 'SET_CALENDARS', payload: storedCalendars });
+      } else {
+        const defaultCalendar: Calendar = {
+          id: 'default',
+          name: 'Personal',
           color: '#3b82f6',
+          description: 'Your personal calendar',
+          isVisible: true,
+          isReadOnly: false,
+          type: 'personal',
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-        {
-          id: 'sample-2',
-          title: 'All Day Event',
-          description: 'This is an all-day event example.',
-          start: new Date(Date.now() + 24 * 60 * 60 * 1000), // Tomorrow
-          end: new Date(Date.now() + 24 * 60 * 60 * 1000), // Tomorrow
-          allDay: true,
-          calendarId: 'default',
-          color: '#10b981',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
-      
-      dispatch({ type: 'SET_EVENTS', payload: sampleEvents });
+        };
+        dispatch({ type: 'SET_CALENDARS', payload: [defaultCalendar] });
+      }
 
-      // Initialize weather data
-      await refreshWeatherData();
+      // Load events from storage or seed samples
+      const storedEvents = loadFromStorage(STORAGE_KEYS.events, reviveEvent);
+      if (storedEvents && storedEvents.length > 0) {
+        dispatch({ type: 'SET_EVENTS', payload: storedEvents });
+      } else {
+        const sampleEvents: CalendarEvent[] = [
+          {
+            id: 'sample-1',
+            title: 'Welcome to Kalendarski!',
+            description: 'This is a sample event to get you started.',
+            start: new Date(),
+            end: new Date(Date.now() + 60 * 60 * 1000),
+            allDay: false,
+            calendarId: 'default',
+            color: '#3b82f6',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+          {
+            id: 'sample-2',
+            title: 'All Day Event',
+            description: 'This is an all-day event example.',
+            start: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            end: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            allDay: true,
+            calendarId: 'default',
+            color: '#10b981',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ];
+        dispatch({ type: 'SET_EVENTS', payload: sampleEvents });
+      }
+
+      // Fetch weather — call getWeatherData directly to avoid stale closure on state.location
+      try {
+        dispatch({ type: 'SET_LOADING', payload: true });
+        const weatherData = await getWeatherData(undefined);
+        dispatch({ type: 'SET_WEATHER_DATA', payload: weatherData });
+        dispatch({ type: 'SET_LOCATION', payload: weatherData.location });
+      } catch (error) {
+        dispatch({
+          type: 'SET_ERROR',
+          payload: {
+            code: 'WEATHER_FETCH_ERROR',
+            message: error instanceof Error ? error.message : 'Failed to fetch weather data',
+            details: error,
+          },
+        });
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
     };
 
     initializeApp();

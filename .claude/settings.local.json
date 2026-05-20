@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(/usr/local/bin/node --version)",
+      "Bash(/opt/homebrew/bin/node --version)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//Users/om/.nvm/versions/**)",
+      "Bash(command -v npx)",
+      "Read(//opt/homebrew/lib/node_modules/npm/bin/**)",
+      "Bash(/opt/homebrew/bin/npx --version)",
+      "Read(//opt/homebrew/opt/node/bin/**)",
+      "Bash(/opt/homebrew/opt/node/bin/node --version)",
+      "Read(//Users/om/.nvm/alias/**)",
+      "Read(//Users/om/.volta/bin/**)",
+      "Read(//Users/om/**)",
+      "Bash(/opt/anaconda3/bin/python --version)",
+      "Read(//opt/anaconda3/bin/**)",
+      "Read(//opt/pkg/env/active/bin/**)",
+      "Read(//opt/pmk/env/global/bin/**)",
+      "Bash(PATH=/Users/om/Library/Caches/JetBrains/acp-agents/.runtimes/node/24.13.0/bin:__TRACKED_VAR__ npm run dev)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(jobs)"
+    ]
+  }
+}

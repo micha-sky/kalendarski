@@ -2,6 +2,7 @@ import React from 'react';
 import { useApp } from '../contexts/AppContext';
 import { Calendar as CalendarIcon, Settings, Menu, RefreshCw, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
+import { isToday } from 'date-fns';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -9,7 +10,8 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
-  const { calendars, weatherData, refreshWeatherData, isLoading } = useApp();
+  const { calendars, events, weatherData, refreshWeatherData, isLoading } = useApp();
+  const eventsToday = events.filter(e => isToday(new Date(e.start))).length;
 
   const handleRefreshWeather = async () => {
     await refreshWeatherData();
@@ -164,10 +166,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Events Today</span>
-                <span className="font-medium">
-                  {/* This would be calculated based on today's events */}
-                  0
-                </span>
+                <span className="font-medium">{eventsToday}</span>
               </div>
             </div>
           </div>
