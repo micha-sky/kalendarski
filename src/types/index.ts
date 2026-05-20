@@ -218,6 +218,16 @@ export interface OpenWeatherMapForecastResponse {
   };
 }
 
+// Per-day hourly weather cache (keyed by 'yyyy-MM-dd')
+export interface DayCacheEntry {
+  hourlyTemps: (number | null)[];  // 24 values, index = hour
+  cloudCover: (number | null)[];   // 24 values
+  sunriseHour: number;
+  sunsetHour: number;
+  fetchedAt: number;               // Date.now()
+  isHistorical: boolean;           // past dates never expire
+}
+
 // Error Types
 export interface AppError {
   code: string;

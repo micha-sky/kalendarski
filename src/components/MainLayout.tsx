@@ -1,22 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
 import Calendar from './Calendar';
 import WeatherHeatmapBackground from './WeatherHeatmapBackground';
 import Sidebar from './Sidebar';
 import EventModal from './EventModal';
-import type {CalendarEvent} from '../types';
+import type { CalendarEvent } from '../types';
 import { generateWeatherHeatmap } from '../utils/weatherHeatmap';
+import {
+  startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
+} from 'date-fns';
 
 const MainLayout: React.FC = () => {
   const {
     events,
     weatherData,
     viewState,
+    location,
+    dayWeatherCache,
     setViewState,
     addEvent,
     updateEvent,
     deleteEvent,
     refreshWeatherData,
+    fetchWeatherForDates,
     error,
     isLoading,
   } = useApp();
@@ -28,13 +34,40 @@ const MainLayout: React.FC = () => {
   const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
 
   // Generate weather heatmap data
-  const weatherHeatmap = weatherData?.hourly && weatherData?.daily?.[0] 
+  const weatherHeatmap = weatherData?.hourly && weatherData?.daily?.[0]
     ? generateWeatherHeatmap(
         weatherData.hourly,
         weatherData.daily[0].sunrise,
-        weatherData.daily[0].sunset
+        weatherData.daily[0].sunset,
       )
     : undefined;
+
+  // Fetch Open-Meteo data for the currently visible date range
+  useEffect(() => {
+    if (!location) return;
+    const d = viewState.currentDate;
+    let start: Date;
+    let end: Date;
+    switch (viewState.viewType) {
+      case 'month':
+        start = startOfWeek(startOfMonth(d));
+        end   = endOfWeek(endOfMonth(d));
+        break;
+      case 'week':
+        start = startOfWeek(d, { weekStartsOn: 1 });
+        end   = endOfWeek(d,   { weekStartsOn: 1 });
+        break;
+      case 'agenda':
+        start = d;
+        end   = addDays(d, 60);
+        break;
+      default: // day
+        start = d;
+        end   = d;
+    }
+    fetchWeatherForDates(start, end);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewState.currentDate, viewState.viewType, location]);
 
   const handleEventClick = (event: CalendarEvent) => {
     setSelectedEvent(event);
@@ -172,6 +205,7 @@ const MainLayout: React.FC = () => {
                 onCreateEvent={handleCreateEvent}
                 weatherHeatmap={weatherHeatmap}
                 weatherData={weatherData}
+                dayWeatherCache={dayWeatherCache}
                 onRefreshWeather={refreshWeatherData}
                 className="h-full"
               />

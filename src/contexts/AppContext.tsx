@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError } from '../types';
+import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
+import { fetchWeatherForRange, getMissingDates } from '../services/openMeteoService';
+import { format } from 'date-fns';
 
 const STORAGE_KEYS = {
   events: 'kalendarski_events',
   calendars: 'kalendarski_calendars',
+  dayWeather: 'kalendarski_day_weather',
 } as const;
 
 const DATE_FIELDS_EVENT = ['start', 'end', 'createdAt', 'updatedAt'] as const;
@@ -52,6 +55,16 @@ interface AppState {
   viewState: CalendarViewState;
   isLoading: boolean;
   error: AppError | null;
+  dayWeatherCache: Record<string, DayCacheEntry>;
+}
+
+function loadDayWeatherCache(): Record<string, DayCacheEntry> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.dayWeather);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
 }
 
 const initialState: AppState = {
@@ -62,6 +75,7 @@ const initialState: AppState = {
   viewState: initialViewState,
   isLoading: false,
   error: null,
+  dayWeatherCache: loadDayWeatherCache(),
 };
 
 // Action types
@@ -78,7 +92,8 @@ type AppAction =
   | { type: 'DELETE_EVENT'; payload: string }
   | { type: 'SET_WEATHER_DATA'; payload: WeatherForecast }
   | { type: 'SET_LOCATION'; payload: Location }
-  | { type: 'SET_VIEW_STATE'; payload: CalendarViewState };
+  | { type: 'SET_VIEW_STATE'; payload: CalendarViewState }
+  | { type: 'MERGE_DAY_WEATHER'; payload: Record<string, DayCacheEntry> };
 
 // Reducer
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -138,7 +153,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
     
     case 'SET_VIEW_STATE':
       return { ...state, viewState: action.payload };
-    
+
+    case 'MERGE_DAY_WEATHER':
+      return { ...state, dayWeatherCache: { ...state.dayWeatherCache, ...action.payload } };
+
     default:
       return state;
   }
@@ -157,6 +175,7 @@ interface AppContextType extends AppState {
   deleteEvent: (eventId: string) => void;
   // Weather actions
   refreshWeatherData: () => Promise<void>;
+  fetchWeatherForDates: (startDate: Date, endDate: Date) => Promise<void>;
   // View actions
   setViewState: (viewState: CalendarViewState) => void;
 }
@@ -247,6 +266,29 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // View actions
   const setViewState = (viewState: CalendarViewState) => {
     dispatch({ type: 'SET_VIEW_STATE', payload: viewState });
+  };
+
+  // Fetch Open-Meteo data for a date range, skipping already-cached dates
+  const fetchWeatherForDates = async (startDate: Date, endDate: Date) => {
+    if (!state.location) return;
+
+    const missing = getMissingDates(startDate, endDate, state.dayWeatherCache);
+    if (missing.length === 0) return;
+
+    const minDate = new Date(missing[0]);
+    const maxDate = new Date(missing[missing.length - 1]);
+
+    try {
+      const fetched = await fetchWeatherForRange(state.location, minDate, maxDate);
+      dispatch({ type: 'MERGE_DAY_WEATHER', payload: fetched });
+      // Persist merged cache
+      const merged = { ...state.dayWeatherCache, ...fetched };
+      try {
+        localStorage.setItem(STORAGE_KEYS.dayWeather, JSON.stringify(merged));
+      } catch { /* ignore quota errors */ }
+    } catch {
+      // Silently ignore — weather data is decorative, not critical
+    }
   };
 
   // Persist events and calendars to localStorage on every change
@@ -351,6 +393,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     updateEvent,
     deleteEvent,
     refreshWeatherData,
+    fetchWeatherForDates,
     setViewState,
   };
 

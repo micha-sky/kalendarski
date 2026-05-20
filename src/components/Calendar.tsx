@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isToday, addDays, isBefore } from 'date-fns';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import type { CalendarEvent, CalendarViewState, WeatherHeatmapData, WeatherForecast } from '../types';
+import type { CalendarEvent, CalendarViewState, WeatherHeatmapData, WeatherForecast, DayCacheEntry } from '../types';
 import { clsx } from 'clsx';
 import { temperatureToRgba, interpolateDailyTemp } from '../utils/weatherHeatmap';
 
@@ -14,6 +14,7 @@ interface CalendarProps {
   onCreateEvent: (date: Date) => void;
   weatherHeatmap?: WeatherHeatmapData[];
   weatherData?: WeatherForecast | null;
+  dayWeatherCache?: Record<string, DayCacheEntry>;
   onRefreshWeather?: () => void;
   className?: string;
 }
@@ -27,16 +28,47 @@ const Calendar: React.FC<CalendarProps> = ({
   onCreateEvent,
   weatherHeatmap,
   weatherData,
+  dayWeatherCache,
   onRefreshWeather,
   className,
 }) => {
   const [hoveredDate, setHoveredDate] = useState<Date | null>(null);
 
   // Returns an rgba background color for a given day (+ optional hour).
-  // Uses hourly interpolation for today, daily min/max for forecast days.
+  // Prefers the Open-Meteo day cache (full history + forecast), falls back to OWM data.
   const getCellColor = (day: Date, hour?: number): string | undefined => {
-    if (!weatherData) return undefined;
+    const dayKey = format(day, 'yyyy-MM-dd');
 
+    // --- Primary: Open-Meteo day cache (covers past + future for any date) ---
+    const cacheEntry = dayWeatherCache?.[dayKey];
+    if (cacheEntry) {
+      const isNight = (h: number) => h < cacheEntry.sunriseHour || h > cacheEntry.sunsetHour;
+
+      if (hour !== undefined) {
+        const temp = cacheEntry.hourlyTemps[hour];
+        if (temp != null) return temperatureToRgba(temp, isNight(hour), 0.28);
+        // Null slot (future hour not yet modelled) — interpolate from neighbours
+        const filled = cacheEntry.hourlyTemps
+          .map((t, i) => (t != null ? { h: i, t } : null))
+          .filter(Boolean) as { h: number; t: number }[];
+        if (filled.length) {
+          const before = [...filled].reverse().find(p => p.h <= hour) ?? filled[0];
+          const after  = filled.find(p => p.h > hour) ?? filled[filled.length - 1];
+          const factor = before === after ? 0 : (hour - before.h) / (after.h - before.h);
+          return temperatureToRgba(before.t + factor * (after.t - before.t), isNight(hour), 0.28);
+        }
+      } else {
+        // Day-level: average of valid hourly readings
+        const valid = cacheEntry.hourlyTemps.filter((t): t is number => t != null);
+        if (valid.length) {
+          const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+          return temperatureToRgba(avg, false, 0.22);
+        }
+      }
+    }
+
+    // --- Fallback: OWM weatherData (today's hourly + 5-day forecast) ---
+    if (!weatherData) return undefined;
     const daily = weatherData.daily;
     if (!daily.length) return undefined;
 
@@ -44,39 +76,26 @@ const Calendar: React.FC<CalendarProps> = ({
     const sunsetHour  = new Date(daily[0].sunset  * 1000).getHours();
     const isNight     = (h: number) => h < sunriseHour || h > sunsetHour;
 
-    const dayKey = format(day, 'yyyy-MM-dd');
-
     if (hour !== undefined) {
-      // Hour-level: day view and week view cells
       if (isSameDay(day, new Date()) && weatherData.hourly.length) {
-        // Today → interpolate between actual hourly data points
         const pts = weatherData.hourly
           .map(d => ({ h: new Date(d.timestamp * 1000).getHours(), t: d.temperature }))
           .sort((a, b) => a.h - b.h);
         const before = [...pts].reverse().find(p => p.h <= hour) ?? pts[0];
         const after  = pts.find(p => p.h > hour) ?? pts[pts.length - 1];
         const factor = before === after ? 0 : (hour - before.h) / (after.h - before.h);
-        const temp   = before.t + factor * (after.t - before.t);
-        return temperatureToRgba(temp, isNight(hour), 0.28);
-      } else {
-        // Forecast day → sinusoidal interpolation from daily min/max
-        const dayData = daily.find(d => d.date === dayKey);
-        if (!dayData) return undefined;
-        const temp = interpolateDailyTemp(hour, dayData.temperatureMin, dayData.temperatureMax);
-        return temperatureToRgba(temp, isNight(hour), 0.22);
+        return temperatureToRgba(before.t + factor * (after.t - before.t), isNight(hour), 0.28);
       }
+      const dayData = daily.find(d => d.date === dayKey);
+      if (!dayData) return undefined;
+      return temperatureToRgba(interpolateDailyTemp(hour, dayData.temperatureMin, dayData.temperatureMax), isNight(hour), 0.22);
     } else {
-      // Day-level: month view cells
       if (isSameDay(day, new Date())) {
         return temperatureToRgba(weatherData.current.temperature, false, 0.22);
       }
       const dayData = daily.find(d => d.date === dayKey);
       if (!dayData) return undefined;
-      return temperatureToRgba(
-        (dayData.temperatureMin + dayData.temperatureMax) / 2,
-        false,
-        0.22,
-      );
+      return temperatureToRgba((dayData.temperatureMin + dayData.temperatureMax) / 2, false, 0.22);
     }
   };
 
