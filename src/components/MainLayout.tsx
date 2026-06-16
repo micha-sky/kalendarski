@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
 import Calendar from './Calendar';
 import WeatherHeatmapBackground from './WeatherHeatmapBackground';
-import Sidebar from './Sidebar';
 import EventModal from './EventModal';
 import type { CalendarEvent } from '../types';
 import { generateWeatherHeatmap } from '../utils/weatherHeatmap';
@@ -30,7 +29,6 @@ const MainLayout: React.FC = () => {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [eventModalDate, setEventModalDate] = useState<Date | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
 
   // Generate weather heatmap data
@@ -110,109 +108,82 @@ const MainLayout: React.FC = () => {
   const showWeatherError = error?.code === 'WEATHER_FETCH_ERROR' && !weatherErrorDismissed;
 
   return (
-    <div className="min-h-screen bg-gray-50 relative overflow-hidden">
+    <div className="h-screen bg-gray-50 relative overflow-hidden flex flex-col">
       {/* Weather Heatmap Background */}
       <WeatherHeatmapBackground
         heatmapData={weatherHeatmap}
         weatherData={weatherData}
       />
 
-      {/* Main Content */}
-      <div className="relative z-10 min-h-screen">
-        <div className="flex h-screen">
-          {/* Sidebar */}
-          <Sidebar
-            isOpen={isSidebarOpen}
-            onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-          />
-
-          {/* Main Calendar Area */}
-          <main className={`flex-1 flex flex-col transition-all duration-300 ${
-            isSidebarOpen ? 'ml-80' : 'ml-16'
-          }`}>
-            {/* Header with glass morphism effect */}
-            <header className="glass border-b border-white/20 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <h1 className="text-2xl font-bold text-gray-900">Kalendarski</h1>
-                  {weatherData?.location && (
-                    <div className="text-sm text-gray-600">
-                      {weatherData.location.city && weatherData.location.country
-                        ? `${weatherData.location.city}, ${weatherData.location.country}`
-                        : `${weatherData.location.latitude.toFixed(2)}, ${weatherData.location.longitude.toFixed(2)}`
-                      }
-                    </div>
-                  )}
-                </div>
-
-                {/* Weather info */}
-                {weatherData?.current && (
-                  <div className="flex items-center space-x-4 text-sm text-gray-600">
-                    <div className="flex items-center space-x-2">
-                      <img
-                        src={`https://openweathermap.org/img/wn/${weatherData.current.icon}@2x.png`}
-                        alt={weatherData.current.condition.description}
-                        className="w-8 h-8"
-                      />
-                      <span>{Math.round(weatherData.current.temperature)}°C</span>
-                    </div>
-                    <div className="text-xs">
-                      {weatherData.current.condition.description}
-                    </div>
-                  </div>
-                )}
-
-                {/* Loading indicator for weather refresh */}
-                {isLoading && !weatherData && (
-                  <div className="flex items-center space-x-2 text-sm text-gray-500">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
-                    <span>Loading weather…</span>
-                  </div>
-                )}
-              </div>
-            </header>
-
-            {/* Weather error banner */}
-            {showWeatherError && (
-              <div className="flex items-center justify-between px-6 py-3 bg-amber-50 border-b border-amber-200 text-sm text-amber-800">
-                <span>{error!.message}</span>
-                <div className="flex items-center space-x-3 ml-4 flex-shrink-0">
-                  <button
-                    onClick={() => { setWeatherErrorDismissed(false); refreshWeatherData(); }}
-                    className="font-medium underline hover:no-underline"
-                  >
-                    Retry
-                  </button>
-                  <button
-                    onClick={() => setWeatherErrorDismissed(true)}
-                    className="text-amber-600 hover:text-amber-800"
-                    aria-label="Dismiss"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Calendar Content */}
-            <div className="flex-1 p-6 overflow-auto">
-              <Calendar
-                events={events}
-                viewState={viewState}
-                onViewStateChange={setViewState}
-                onEventClick={handleEventClick}
-                onDateClick={handleDateClick}
-                onCreateEvent={handleCreateEvent}
-                weatherHeatmap={weatherHeatmap}
-                weatherData={weatherData}
-                dayWeatherCache={dayWeatherCache}
-                onRefreshWeather={refreshWeatherData}
-                className="h-full"
-              />
-            </div>
-          </main>
+      {/* Slim top bar */}
+      <header className="relative z-10 glass border-b border-white/20 px-4 py-2 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold text-gray-900">Kalendarski</h1>
+          {weatherData?.location && (
+            <span className="text-xs text-gray-500">
+              {weatherData.location.city && weatherData.location.country
+                ? `${weatherData.location.city}, ${weatherData.location.country}`
+                : `${weatherData.location.latitude.toFixed(2)}, ${weatherData.location.longitude.toFixed(2)}`}
+            </span>
+          )}
         </div>
-      </div>
+
+        <div className="flex items-center gap-3">
+          {isLoading && (
+            <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-blue-600" />
+          )}
+          {weatherData?.current && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-600">
+              <img
+                src={`https://openweathermap.org/img/wn/${weatherData.current.icon}.png`}
+                alt={weatherData.current.condition.description}
+                className="w-6 h-6"
+              />
+              <span className="font-medium">{Math.round(weatherData.current.temperature)}°C</span>
+              <span className="text-gray-400 capitalize">{weatherData.current.condition.description}</span>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Weather error banner */}
+      {showWeatherError && (
+        <div className="relative z-10 flex items-center justify-between px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-800 flex-shrink-0">
+          <span>{error!.message}</span>
+          <div className="flex items-center gap-3 ml-4">
+            <button
+              onClick={() => { setWeatherErrorDismissed(false); refreshWeatherData(); }}
+              className="font-medium underline hover:no-underline"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => setWeatherErrorDismissed(true)}
+              className="text-amber-600 hover:text-amber-800"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar — fills remaining screen */}
+      <main className="relative z-10 flex-1 overflow-hidden">
+        <Calendar
+          events={events}
+          viewState={viewState}
+          onViewStateChange={setViewState}
+          onEventClick={handleEventClick}
+          onDateClick={handleDateClick}
+          onCreateEvent={handleCreateEvent}
+          weatherHeatmap={weatherHeatmap}
+          weatherData={weatherData}
+          dayWeatherCache={dayWeatherCache}
+          onRefreshWeather={refreshWeatherData}
+          className="h-full"
+        />
+      </main>
 
       {/* Event Modal */}
       <EventModal

@@ -13,6 +13,7 @@ interface OpenMeteoResponse {
     time: string[];
     temperature_2m: number[];
     cloud_cover: number[];
+    precipitation_probability?: number[];
   };
   daily: {
     time: string[];
@@ -36,7 +37,7 @@ function parseResponse(data: OpenMeteoResponse, today: string): Record<string, D
   }
 
   // Bucket hourly readings by date
-  const byDate = new Map<string, { temps: (number | null)[]; clouds: (number | null)[] }>();
+  const byDate = new Map<string, { temps: (number | null)[]; clouds: (number | null)[]; precip: (number | null)[] }>();
   data.hourly.time.forEach((timeStr, i) => {
     const [dateStr, hourPart] = timeStr.split('T');
     const hour = parseInt(hourPart.split(':')[0], 10);
@@ -44,19 +45,22 @@ function parseResponse(data: OpenMeteoResponse, today: string): Record<string, D
       byDate.set(dateStr, {
         temps:  new Array(24).fill(null),
         clouds: new Array(24).fill(null),
+        precip: new Array(24).fill(null),
       });
     }
     const bucket = byDate.get(dateStr)!;
     bucket.temps[hour]  = data.hourly.temperature_2m[i] ?? null;
     bucket.clouds[hour] = data.hourly.cloud_cover[i]   ?? null;
+    bucket.precip[hour] = data.hourly.precipitation_probability?.[i] ?? null;
   });
 
   const result: Record<string, DayCacheEntry> = {};
-  for (const [dateStr, { temps, clouds }] of byDate) {
+  for (const [dateStr, { temps, clouds, precip }] of byDate) {
     const sun = sunMap.get(dateStr);
     result[dateStr] = {
-      hourlyTemps:  temps,
-      cloudCover:   clouds,
+      hourlyTemps:              temps,
+      cloudCover:               clouds,
+      precipitationProbability: precip,
       sunriseHour:  sun?.sunriseHour ?? 6,
       sunsetHour:   sun?.sunsetHour  ?? 20,
       fetchedAt:    now,
@@ -84,7 +88,7 @@ async function fetchForecast(
   const url = new URL(FORECAST_URL);
   url.searchParams.set('latitude',     location.latitude.toString());
   url.searchParams.set('longitude',    location.longitude.toString());
-  url.searchParams.set('hourly',       'temperature_2m,cloud_cover');
+  url.searchParams.set('hourly',       'temperature_2m,cloud_cover,precipitation_probability');
   url.searchParams.set('daily',        'sunrise,sunset');
   url.searchParams.set('timezone',     'auto');
   url.searchParams.set('past_days',    pastDays.toString());

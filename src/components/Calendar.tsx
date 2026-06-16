@@ -120,6 +120,50 @@ const Calendar: React.FC<CalendarProps> = ({
     }
   };
 
+  // --- Weather badge helpers ---
+  const getWeatherEmoji = (cloudPct: number, rainPct: number): string => {
+    if (rainPct > 60) return '🌧️';
+    if (rainPct > 20) return '🌦️';
+    if (cloudPct < 20) return '☀️';
+    if (cloudPct < 50) return '🌤️';
+    if (cloudPct < 75) return '⛅';
+    return '☁️';
+  };
+
+  const getDayWeather = (day: Date): { temp: number; emoji: string; rainPercent: number } | null => {
+    const dayKey = format(day, 'yyyy-MM-dd');
+    const entry = dayWeatherCache?.[dayKey];
+
+    if (entry) {
+      const daytimeSlots: number[] = [];
+      for (let h = entry.sunriseHour; h <= entry.sunsetHour; h++) daytimeSlots.push(h);
+
+      const daytimeTemps = daytimeSlots.map(h => entry.hourlyTemps[h]).filter((t): t is number => t != null);
+      const daytimeClouds = daytimeSlots.map(h => entry.cloudCover[h]).filter((c): c is number => c != null);
+      const allPrecip = (entry.precipitationProbability ?? []).filter((p): p is number => p != null);
+
+      if (!daytimeTemps.length) return null;
+
+      const avgTemp = daytimeTemps.reduce((a, b) => a + b, 0) / daytimeTemps.length;
+      const avgCloud = daytimeClouds.length
+        ? daytimeClouds.reduce((a, b) => a + b, 0) / daytimeClouds.length
+        : 0;
+      const maxRain = allPrecip.length ? Math.max(...allPrecip) : 0;
+
+      return { temp: Math.round(avgTemp), emoji: getWeatherEmoji(avgCloud, maxRain), rainPercent: Math.round(maxRain) };
+    }
+
+    // Fallback: OWM daily data
+    const dayData = weatherData?.daily.find(d => d.date === dayKey);
+    if (dayData) {
+      const avgTemp = (dayData.temperatureMin + dayData.temperatureMax) / 2;
+      const rainPercent = Math.round(dayData.precipitationProbability ?? 0);
+      return { temp: Math.round(avgTemp), emoji: getWeatherEmoji(dayData.cloudCover, rainPercent), rainPercent };
+    }
+
+    return null;
+  };
+
   const { currentDate, viewType } = viewState;
 
   // Auto-scroll to current hour in day view and refresh weather data
@@ -227,11 +271,14 @@ const Calendar: React.FC<CalendarProps> = ({
             const isTodayDate = isToday(day);
             const cellColor = getCellColor(day);
 
+            const dayWeather = getDayWeather(day);
+            const isHovered = hoveredDate && isSameDay(hoveredDate, day);
+
             return (
               <div
                 key={day.toISOString()}
                 className={clsx(
-                  'relative min-h-[120px] p-2 border-r border-b border-gray-200/60 cursor-pointer transition-all duration-150',
+                  'relative min-h-[100px] p-2 border-r border-b border-gray-200/60 cursor-pointer transition-all duration-150',
                   'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset',
                   {
                     'ring-2 ring-inset ring-blue-400': isSelected,
@@ -247,12 +294,11 @@ const Calendar: React.FC<CalendarProps> = ({
                 role="gridcell"
                 aria-label={format(day, 'MMMM d, yyyy')}
               >
-
-                {/* Date number */}
-                <div className="flex items-center justify-between mb-1">
+                {/* Date number + weather badge / add button */}
+                <div className="flex items-start justify-between mb-1">
                   <span
                     className={clsx(
-                      'text-sm font-medium',
+                      'text-sm font-medium leading-none',
                       {
                         'text-white bg-blue-500 rounded-full w-6 h-6 flex items-center justify-center shadow-sm': isTodayDate,
                         'text-gray-900': isCurrentMonth && !isTodayDate,
@@ -263,19 +309,31 @@ const Calendar: React.FC<CalendarProps> = ({
                     {format(day, 'd')}
                   </span>
 
-                  {/* Add event button (visible on hover) */}
-                  {hoveredDate && isSameDay(hoveredDate, day) && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCreateEvent(day);
-                      }}
-                      className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-sm"
-                      aria-label="Add event"
-                    >
-                      <Plus size={12} />
-                    </button>
-                  )}
+                  <div className="flex flex-col items-end gap-0.5">
+                    {/* Weather badge — hidden on hover to show + button */}
+                    {dayWeather && !isHovered && (
+                      <div className="flex items-center gap-0.5 text-[9px] leading-none text-gray-700/80">
+                        <span>{dayWeather.emoji}</span>
+                        <span className="font-medium">{dayWeather.temp}°</span>
+                        {dayWeather.rainPercent > 0 && (
+                          <span className="text-blue-600/80">💧{dayWeather.rainPercent}%</span>
+                        )}
+                      </div>
+                    )}
+                    {/* Add event button (visible on hover) */}
+                    {isHovered && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCreateEvent(day);
+                        }}
+                        className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-sm"
+                        aria-label="Add event"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Events */}
@@ -329,7 +387,7 @@ const Calendar: React.FC<CalendarProps> = ({
     };
 
     return (
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <h1 className="text-2xl font-semibold text-gray-900">{getTitle()}</h1>
           
@@ -461,12 +519,13 @@ const Calendar: React.FC<CalendarProps> = ({
             {weekDays.map((day) => {
               const isCurrentDay = isSameDay(day, today);
               const dayEvents = getEventsForDay(day);
+              const dayWeather = getDayWeather(day);
 
               return (
                 <div
                   key={day.toISOString()}
                   className={clsx(
-                    'p-3 text-center border-r border-gray-200 last:border-r-0 cursor-pointer hover:bg-gray-50 transition-colors',
+                    'p-2 text-center border-r border-gray-200 last:border-r-0 cursor-pointer hover:bg-gray-50 transition-colors',
                     {
                       'bg-blue-50 border-blue-200': isCurrentDay,
                     }
@@ -474,7 +533,7 @@ const Calendar: React.FC<CalendarProps> = ({
                   onClick={() => onDateClick(day)}
                 >
                   <div className={clsx(
-                    'text-sm font-medium',
+                    'text-xs font-medium',
                     {
                       'text-blue-600': isCurrentDay,
                       'text-gray-900': !isCurrentDay,
@@ -483,7 +542,7 @@ const Calendar: React.FC<CalendarProps> = ({
                     {format(day, 'EEE')}
                   </div>
                   <div className={clsx(
-                    'text-lg font-semibold mt-1',
+                    'text-lg font-semibold mt-0.5',
                     {
                       'text-blue-600': isCurrentDay,
                       'text-gray-700': !isCurrentDay,
@@ -491,8 +550,17 @@ const Calendar: React.FC<CalendarProps> = ({
                   )}>
                     {format(day, 'd')}
                   </div>
+                  {dayWeather && (
+                    <div className="flex items-center justify-center gap-0.5 text-[9px] leading-none text-gray-600 mt-1">
+                      <span>{dayWeather.emoji}</span>
+                      <span>{dayWeather.temp}°</span>
+                      {dayWeather.rainPercent > 0 && (
+                        <span className="text-blue-500">💧{dayWeather.rainPercent}%</span>
+                      )}
+                    </div>
+                  )}
                   {dayEvents.length > 0 && (
-                    <div className="text-xs text-gray-500 mt-1">
+                    <div className="text-[9px] text-gray-400 mt-0.5">
                       {dayEvents.length} event{dayEvents.length !== 1 ? 's' : ''}
                     </div>
                   )}
@@ -785,17 +853,27 @@ const Calendar: React.FC<CalendarProps> = ({
         {Array.from(groups.entries()).map(([key, dayEvents]) => {
           const date = new Date(key);
           const todayDate = isToday(date);
+          const dayWeather = getDayWeather(date);
           return (
             <div key={key} className="flex">
               {/* Date column */}
               <div className={clsx(
-                'w-36 flex-shrink-0 p-4 border-r border-gray-100',
+                'w-36 flex-shrink-0 p-3 border-r border-gray-100',
                 todayDate ? 'bg-blue-50' : 'bg-gray-50/50'
               )}>
                 <div className={clsx('text-sm font-semibold', todayDate ? 'text-blue-600' : 'text-gray-900')}>
                   {format(date, 'EEE, MMM d')}
                 </div>
                 {todayDate && <div className="text-xs text-blue-500 mt-0.5">Today</div>}
+                {dayWeather && (
+                  <div className="flex items-center gap-0.5 text-[10px] leading-none text-gray-500 mt-1.5">
+                    <span>{dayWeather.emoji}</span>
+                    <span>{dayWeather.temp}°</span>
+                    {dayWeather.rainPercent > 0 && (
+                      <span className="text-blue-500 ml-0.5">💧{dayWeather.rainPercent}%</span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Events column */}
@@ -830,16 +908,17 @@ const Calendar: React.FC<CalendarProps> = ({
   };
 
   return (
-    <div className={clsx('flex flex-col h-full', className)}>
-      {renderHeader()}
+    <div className={clsx('flex flex-col h-full overflow-hidden', className)}>
+      <div className="px-4 py-3 flex-shrink-0">
+        {renderHeader()}
+      </div>
 
-      {viewType === 'month' && renderMonthView()}
-
-      {viewType === 'week' && renderWeekView()}
-
-      {viewType === 'day' && renderDayView()}
-
-      {viewType === 'agenda' && renderAgendaView()}
+      <div className="flex-1 overflow-auto px-4 pb-2">
+        {viewType === 'month' && renderMonthView()}
+        {viewType === 'week' && renderWeekView()}
+        {viewType === 'day' && renderDayView()}
+        {viewType === 'agenda' && renderAgendaView()}
+      </div>
     </div>
   );
 };

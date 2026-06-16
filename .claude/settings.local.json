@@ -29,7 +29,8 @@
       "Read(//usr/bin/**)",
       "Read(//opt/**)",
       "Bash(PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:__TRACKED_VAR__ node --version)",
-      "Bash(PATH=/Users/om/.volta/bin:__TRACKED_VAR__ node --version)"
+      "Bash(PATH=/Users/om/.volta/bin:__TRACKED_VAR__ node --version)",
+      "Bash(npx vite *)"
     ]
   }
 }

@@ -220,8 +220,9 @@ export interface OpenWeatherMapForecastResponse {
 
 // Per-day hourly weather cache (keyed by 'yyyy-MM-dd')
 export interface DayCacheEntry {
-  hourlyTemps: (number | null)[];  // 24 values, index = hour
-  cloudCover: (number | null)[];   // 24 values
+  hourlyTemps: (number | null)[];              // 24 values, index = hour
+  cloudCover: (number | null)[];               // 24 values
+  precipitationProbability?: (number | null)[]; // 24 values, 0-100; forecast only
   sunriseHour: number;
   sunsetHour: number;
   fetchedAt: number;               // Date.now()
