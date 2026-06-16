@@ -179,38 +179,40 @@ export function getCurrentLocation(): Promise<Location> {
       return;
     }
 
-    const options: PositionOptions = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 300000, // 5 minutes
+    const tryGetPosition = (highAccuracy: boolean) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        },
+        (error) => {
+          // kCLErrorLocationUnknown maps to POSITION_UNAVAILABLE — retry with low accuracy
+          if (error.code === error.POSITION_UNAVAILABLE && highAccuracy) {
+            tryGetPosition(false);
+            return;
+          }
+
+          let message = 'Failed to get your location.';
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              message = 'Location access denied. Please enable location services.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              message = 'Location information is unavailable.';
+              break;
+            case error.TIMEOUT:
+              message = 'Location request timed out.';
+              break;
+          }
+          reject(new Error(message));
+        },
+        { enableHighAccuracy: highAccuracy, timeout: 10000, maximumAge: 300000 },
+      );
     };
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-      },
-      (error) => {
-        let message = 'Failed to get your location.';
-        
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            message = 'Location access denied. Please enable location services.';
-            break;
-          case error.POSITION_UNAVAILABLE:
-            message = 'Location information is unavailable.';
-            break;
-          case error.TIMEOUT:
-            message = 'Location request timed out.';
-            break;
-        }
-        
-        reject(new Error(message));
-      },
-      options
-    );
+    tryGetPosition(true);
   });
 }
 

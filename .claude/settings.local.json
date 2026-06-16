@@ -24,7 +24,12 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
       "Bash(jobs)",
       "Bash(npx tsc *)",
-      "Bash(/Users/om/Library/Caches/JetBrains/acp-agents/.runtimes/node/24.13.0/bin/node ./node_modules/.bin/tsc --noEmit)"
+      "Bash(/Users/om/Library/Caches/JetBrains/acp-agents/.runtimes/node/24.13.0/bin/node ./node_modules/.bin/tsc --noEmit)",
+      "Bash(~/.nvm/versions/node/*/bin/node --version)",
+      "Read(//usr/bin/**)",
+      "Read(//opt/**)",
+      "Bash(PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:__TRACKED_VAR__ node --version)",
+      "Bash(PATH=/Users/om/.volta/bin:__TRACKED_VAR__ node --version)"
     ]
   }
 }
