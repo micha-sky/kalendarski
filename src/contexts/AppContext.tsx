@@ -1,9 +1,9 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import { useReducer, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
 import { fetchWeatherForRange, getMissingDates } from '../services/openMeteoService';
-import { format } from 'date-fns';
+import { AppContext, type AppContextType } from './useApp';
 
 const STORAGE_KEYS = {
   events: 'kalendarski_events',
@@ -47,7 +47,7 @@ const initialViewState: CalendarViewState = {
   viewType: 'month',
 };
 
-interface AppState {
+export interface AppState {
   calendars: Calendar[];
   events: CalendarEvent[];
   weatherData: WeatherForecast | null;
@@ -79,7 +79,7 @@ const initialState: AppState = {
 };
 
 // Action types
-type AppAction =
+export type AppAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: AppError | null }
   | { type: 'SET_CALENDARS'; payload: Calendar[] }
@@ -162,32 +162,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-// Context
-interface AppContextType extends AppState {
-  dispatch: React.Dispatch<AppAction>;
-  // Calendar actions
-  addCalendar: (calendar: Omit<Calendar, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateCalendar: (calendar: Calendar) => void;
-  deleteCalendar: (calendarId: string) => void;
-  // Event actions
-  addEvent: (event: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateEvent: (event: CalendarEvent) => void;
-  deleteEvent: (eventId: string) => void;
-  // Weather actions
-  refreshWeatherData: () => Promise<void>;
-  fetchWeatherForDates: (startDate: Date, endDate: Date) => Promise<void>;
-  // View actions
-  setViewState: (viewState: CalendarViewState) => void;
-}
-
-const AppContext = createContext<AppContextType | undefined>(undefined);
-
 // Provider component
 interface AppProviderProps {
   children: ReactNode;
 }
 
-export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
+export const AppProvider = ({ children }: AppProviderProps) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
   // Generate unique ID
@@ -402,13 +382,4 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       {children}
     </AppContext.Provider>
   );
-};
-
-// Hook to use the context
-export const useApp = (): AppContextType => {
-  const context = useContext(AppContext);
-  if (context === undefined) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
-  return context;
 };

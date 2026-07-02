@@ -54,7 +54,8 @@ function transformWeatherData(
   }));
 
   // Transform daily data by grouping forecast items by date
-  const dailyMap = new Map<string, any[]>();
+  type ForecastItem = OpenWeatherMapForecastResponse['list'][number];
+  const dailyMap = new Map<string, ForecastItem[]>();
   forecastResponse.list.forEach((item) => {
     const date = item.dt_txt.split(' ')[0];
     if (!dailyMap.has(date)) {
@@ -241,7 +242,7 @@ export async function reverseGeocode(location: Location): Promise<Location> {
     }
     
     return location;
-  } catch (error) {
+  } catch {
     // Return location without city/country if geocoding fails
     return location;
   }
@@ -286,7 +287,7 @@ export function getCachedWeatherData(location: Location): WeatherForecast | null
     }
     
     return cacheData.data;
-  } catch (error) {
+  } catch {
     localStorage.removeItem(CACHE_KEY);
     return null;
   }

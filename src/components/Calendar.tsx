@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isToday, addDays, isBefore } from 'date-fns';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import type { CalendarEvent, CalendarViewState, WeatherHeatmapData, WeatherForecast, DayCacheEntry } from '../types';
+import type { CalendarEvent, CalendarViewState, WeatherForecast, DayCacheEntry } from '../types';
 import { clsx } from 'clsx';
 import { temperatureToRgba, interpolateDailyTemp, temperatureToRgbaEnhanced, daytimeColorFromRange } from '../utils/weatherHeatmap';
 
@@ -12,12 +12,59 @@ interface CalendarProps {
   onEventClick: (event: CalendarEvent) => void;
   onDateClick: (date: Date) => void;
   onCreateEvent: (date: Date) => void;
-  weatherHeatmap?: WeatherHeatmapData[];
   weatherData?: WeatherForecast | null;
   dayWeatherCache?: Record<string, DayCacheEntry>;
-  onRefreshWeather?: () => void;
   className?: string;
 }
+
+// Renders a tiny canvas (1px per cell) that the browser bilinearly upscales —
+// giving a seamless 2D gradient across the whole calendar grid.
+const GradientCanvas = ({
+  colors,
+  style,
+}: {
+  colors: (string | undefined)[][];
+  style?: React.CSSProperties;
+}) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rows = colors.length;
+    const cols = colors[0]?.length ?? 0;
+    if (!rows || !cols) return;
+
+    el.width = cols;
+    el.height = rows;
+    const ctx = el.getContext('2d');
+    if (!ctx) return;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        ctx.fillStyle = colors[r][c] ?? 'rgb(248,250,252)';
+        ctx.fillRect(c, r, 1, 1);
+      }
+    }
+  }, [colors]);
+
+  return (
+    <canvas
+      ref={ref}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        imageRendering: 'auto',
+        zIndex: 0,
+        ...style,
+      }}
+    />
+  );
+};
 
 const Calendar: React.FC<CalendarProps> = ({
   events,
@@ -26,10 +73,8 @@ const Calendar: React.FC<CalendarProps> = ({
   onEventClick,
   onDateClick,
   onCreateEvent,
-  weatherHeatmap,
   weatherData,
   dayWeatherCache,
-  onRefreshWeather,
   className,
 }) => {
   const [hoveredDate, setHoveredDate] = useState<Date | null>(null);
@@ -166,35 +211,23 @@ const Calendar: React.FC<CalendarProps> = ({
 
   const { currentDate, viewType } = viewState;
 
-  // Auto-scroll to current hour in day view and refresh weather data
-  React.useEffect(() => {
-    if (viewType === 'day') {
-      const currentHour = new Date().getHours();
-      const isToday = isSameDay(currentDate, new Date());
+  // Auto-scroll to the current hour when viewing today in day view.
+  // (Weather for arbitrary dates is fetched by MainLayout's range effect,
+  // so there's no need to trigger a refresh from here.)
+  useEffect(() => {
+    if (viewType !== 'day') return;
+    if (!isSameDay(currentDate, new Date())) return;
 
-      // Auto-scroll to current hour if viewing today
-      if (isToday) {
-        const timeline = document.getElementById('day-view-timeline');
-        const currentHourElement = document.getElementById(`hour-${currentHour}`);
-        if (timeline && currentHourElement) {
-          setTimeout(() => {
-            currentHourElement.scrollIntoView({
-              behavior: 'smooth',
-              block: 'center'
-            });
-          }, 100);
-        }
-      }
-
-      // Refresh weather data when changing dates in day view
-      // For now, we'll refresh weather data whenever the date changes in day view
-      // since the current weather API provides data for the current day
-      if (!isToday && onRefreshWeather) {
-        // Only refresh if we're viewing a different day than today
-        onRefreshWeather();
-      }
+    const currentHour = new Date().getHours();
+    const timeline = document.getElementById('day-view-timeline');
+    const currentHourElement = document.getElementById(`hour-${currentHour}`);
+    if (timeline && currentHourElement) {
+      const id = setTimeout(() => {
+        currentHourElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+      return () => clearTimeout(id);
     }
-  }, [viewType, currentDate, weatherHeatmap, onRefreshWeather]);
+  }, [viewType, currentDate]);
 
   // Navigation handlers
   const navigatePrevious = () => {
@@ -250,27 +283,38 @@ const Calendar: React.FC<CalendarProps> = ({
   const renderMonthView = () => {
     const days = getCalendarDays();
     const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const numWeeks = Math.ceil(days.length / 7);
+
+    // 2D color grid for the gradient canvas.
+    // Out-of-month cells get a neutral color so they fade naturally at the edges.
+    const colorGrid: string[][] = Array.from({ length: numWeeks }, (_, r) =>
+      days.slice(r * 7, (r + 1) * 7).map(day =>
+        isSameMonth(day, currentDate)
+          ? (getCellColor(day) ?? 'rgb(248,250,252)')
+          : 'rgb(243,244,246)'
+      )
+    );
 
     return (
-      <div className="flex-1 rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <div className="flex-1 rounded-lg shadow-sm border border-white/30 overflow-hidden">
         {/* Week day headers */}
-        <div className="grid grid-cols-7 bg-white border-b border-gray-200">
+        <div className="grid grid-cols-7 bg-white/70 backdrop-blur-sm border-b border-white/30">
           {weekDays.map(day => (
-            <div key={day} className="p-3 text-center text-sm font-medium text-gray-700">
+            <div key={day} className="p-3 text-center text-sm font-medium text-gray-600">
               {day}
             </div>
           ))}
         </div>
 
-        {/* Calendar grid */}
-        <div className="grid grid-cols-7">
+        {/* Calendar grid — canvas provides the seamless gradient; cells are transparent */}
+        <div className="relative grid grid-cols-7">
+          <GradientCanvas colors={colorGrid} />
+
           {days.map((day) => {
             const dayEvents = getEventsForDate(day);
             const isCurrentMonth = isSameMonth(day, currentDate);
             const isSelected = viewState.selectedDate && isSameDay(day, viewState.selectedDate);
             const isTodayDate = isToday(day);
-            const cellColor = getCellColor(day);
-
             const dayWeather = getDayWeather(day);
             const isHovered = hoveredDate && isSameDay(hoveredDate, day);
 
@@ -278,15 +322,10 @@ const Calendar: React.FC<CalendarProps> = ({
               <div
                 key={day.toISOString()}
                 className={clsx(
-                  'relative min-h-[100px] p-2 border-r border-b border-gray-200/60 cursor-pointer transition-all duration-150',
-                  'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset',
-                  {
-                    'ring-2 ring-inset ring-blue-400': isSelected,
-                    'opacity-50': !isCurrentMonth,
-                    'text-gray-500': !isCurrentMonth,
-                  }
+                  'relative min-h-[100px] p-2 border-r border-b border-black/[0.06] cursor-pointer z-[1]',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
+                  { 'text-gray-400': !isCurrentMonth }
                 )}
-                style={{ backgroundColor: cellColor ?? (isCurrentMonth ? 'white' : '#f9fafb') }}
                 onClick={() => onDateClick(day)}
                 onMouseEnter={() => setHoveredDate(day)}
                 onMouseLeave={() => setHoveredDate(null)}
@@ -294,6 +333,14 @@ const Calendar: React.FC<CalendarProps> = ({
                 role="gridcell"
                 aria-label={format(day, 'MMMM d, yyyy')}
               >
+                {/* Selection / hover highlight */}
+                {isSelected && (
+                  <div className="absolute inset-0 ring-2 ring-inset ring-blue-400/60 pointer-events-none rounded-sm" style={{ zIndex: 20 }} />
+                )}
+                {isHovered && !isSelected && (
+                  <div className="absolute inset-0 bg-white/20 pointer-events-none" style={{ zIndex: 20 }} />
+                )}
+
                 {/* Date number + weather badge / add button */}
                 <div className="flex items-start justify-between mb-1">
                   <span
@@ -301,7 +348,7 @@ const Calendar: React.FC<CalendarProps> = ({
                       'text-sm font-medium leading-none',
                       {
                         'text-white bg-blue-500 rounded-full w-6 h-6 flex items-center justify-center shadow-sm': isTodayDate,
-                        'text-gray-900': isCurrentMonth && !isTodayDate,
+                        'text-gray-800': isCurrentMonth && !isTodayDate,
                         'text-gray-400': !isCurrentMonth,
                       }
                     )}
@@ -310,7 +357,6 @@ const Calendar: React.FC<CalendarProps> = ({
                   </span>
 
                   <div className="flex flex-col items-end gap-0.5">
-                    {/* Weather badge — hidden on hover to show + button */}
                     {dayWeather && !isHovered && (
                       <div className="flex items-center gap-0.5 text-[9px] leading-none text-gray-700/80">
                         <span>{dayWeather.emoji}</span>
@@ -320,7 +366,6 @@ const Calendar: React.FC<CalendarProps> = ({
                         )}
                       </div>
                     )}
-                    {/* Add event button (visible on hover) */}
                     {isHovered && (
                       <button
                         onClick={(e) => {
@@ -345,10 +390,7 @@ const Calendar: React.FC<CalendarProps> = ({
                         e.stopPropagation();
                         onEventClick(event);
                       }}
-                      className={clsx(
-                        'text-xs px-2 py-1 rounded text-white cursor-pointer truncate shadow-sm',
-                        'hover:opacity-80 transition-opacity backdrop-blur-sm'
-                      )}
+                      className="text-xs px-2 py-1 rounded text-white cursor-pointer truncate shadow-sm hover:opacity-80 transition-opacity backdrop-blur-sm"
                       style={{ backgroundColor: event.color || '#3b82f6' }}
                       title={event.title}
                     >
@@ -357,7 +399,7 @@ const Calendar: React.FC<CalendarProps> = ({
                   ))}
 
                   {dayEvents.length > 3 && (
-                    <div className="text-xs text-gray-700 px-2 bg-white/60 rounded inline-block">
+                    <div className="text-xs text-gray-700 px-2 bg-white/50 rounded inline-block">
                       +{dayEvents.length - 3} more
                     </div>
                   )}
@@ -375,10 +417,11 @@ const Calendar: React.FC<CalendarProps> = ({
       switch (viewType) {
         case 'month':
           return format(currentDate, 'MMMM yyyy');
-        case 'week':
+        case 'week': {
           const weekStart = startOfWeek(currentDate);
           const weekEnd = endOfWeek(currentDate);
           return `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`;
+        }
         case 'day':
           return format(currentDate, 'EEEE, MMMM d, yyyy');
         default:
@@ -453,7 +496,6 @@ const Calendar: React.FC<CalendarProps> = ({
     const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 }); // Start on Monday
     const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
     const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
-    const hours = Array.from({ length: 24 }, (_, i) => i);
     const currentHour = new Date().getHours();
     const today = new Date();
 
@@ -611,75 +653,77 @@ const Calendar: React.FC<CalendarProps> = ({
 
         {/* Week grid with hours */}
         <div className="flex-1 overflow-auto" style={{ maxHeight: 'calc(100vh - 300px)' }}>
-          <div className="relative">
-            {hours.map((hour) => {
-              const isCurrentHour = isSameDay(currentDate, today) && hour === currentHour;
-
-              return (
-                <div
-                  key={hour}
-                  className={clsx(
-                    'grid grid-cols-8 border-b border-gray-100 min-h-[60px]',
-                    {
-                      'bg-blue-50/50': isCurrentHour,
-                    }
-                  )}
-                >
-                  {/* Time column */}
-                  <div className="p-2 text-center text-sm text-gray-500 border-r border-gray-200 flex items-center justify-center">
-                    <div>
-                      <div className="font-medium">
-                        {hour === 0 ? '12' : hour > 12 ? hour - 12 : hour}
-                      </div>
-                      <div className="text-xs">
-                        {hour < 12 ? 'AM' : 'PM'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Day columns */}
-                  {weekDays.map((day) => {
-                    const dayEvents = getEventsForDayAndHour(day, hour);
-                    const isCurrentDay = isSameDay(day, today);
-
-                    return (
-                      <div
-                        key={`${day.toISOString()}-${hour}`}
-                        className="relative border-r border-gray-200 last:border-r-0 p-1 transition-colors cursor-pointer hover:brightness-95"
-                        style={{ backgroundColor: getCellColor(day, hour) ?? 'white' }}
-                        onClick={() => {
-                          const eventDate = new Date(day);
-                          eventDate.setHours(hour, 0, 0, 0);
-                          onCreateEvent(eventDate);
-                        }}
-                      >
-                        {/* Events for this hour */}
-                        {dayEvents.map((event) => (
-                          <div
-                            key={event.id}
-                            className="text-xs p-1 mb-1 rounded cursor-pointer truncate shadow-sm text-white"
-                            style={{ backgroundColor: event.color || '#3b82f6' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onEventClick(event);
-                            }}
-                            title={`${event.title}\n${format(event.start, 'h:mm a')} - ${format(event.end, 'h:mm a')}`}
-                          >
-                            {event.title}
+          {/* Gradient canvas covers the 7 day columns (skips the 12.5% time column) */}
+          {(() => {
+            const weekColorGrid: string[][] = Array.from({ length: 24 }, (_, hour) =>
+              weekDays.map(day => getCellColor(day, hour) ?? 'rgb(248,250,252)')
+            );
+            return (
+              <div className="relative">
+                <GradientCanvas
+                  colors={weekColorGrid}
+                  style={{ left: '12.5%', width: '87.5%', top: 0, bottom: 0, height: 'auto' }}
+                />
+                {Array.from({ length: 24 }, (_, hour) => {
+                  const isCurrentHour = isSameDay(currentDate, today) && hour === currentHour;
+                  return (
+                    <div
+                      key={hour}
+                      className="grid grid-cols-8 border-b border-black/[0.05] min-h-[60px]"
+                    >
+                      {/* Time column — opaque so it stays legible */}
+                      <div className="p-2 text-center text-sm text-gray-500 border-r border-black/[0.07] flex items-center justify-center bg-white/80 backdrop-blur-sm">
+                        <div>
+                          <div className={clsx('font-medium', isCurrentHour && 'text-blue-600')}>
+                            {hour === 0 ? '12' : hour > 12 ? hour - 12 : hour}
                           </div>
-                        ))}
-
-                        {/* Add event button on hover */}
-                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                          <Plus className="w-4 h-4 text-gray-400" />
+                          <div className="text-xs">{hour < 12 ? 'AM' : 'PM'}</div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
+
+                      {/* Day columns — transparent, canvas gradient shows through */}
+                      {weekDays.map((day) => {
+                        const dayEvents = getEventsForDayAndHour(day, hour);
+                        return (
+                          <div
+                            key={`${day.toISOString()}-${hour}`}
+                            className={clsx(
+                              'relative border-r border-black/[0.05] last:border-r-0 p-1 cursor-pointer z-[1]',
+                              'hover:bg-white/20 transition-colors',
+                              isCurrentHour && 'ring-1 ring-inset ring-blue-400/40'
+                            )}
+                            onClick={() => {
+                              const eventDate = new Date(day);
+                              eventDate.setHours(hour, 0, 0, 0);
+                              onCreateEvent(eventDate);
+                            }}
+                          >
+                            {dayEvents.map((event) => (
+                              <div
+                                key={event.id}
+                                className="text-xs p-1 mb-1 rounded cursor-pointer truncate shadow-sm text-white"
+                                style={{ backgroundColor: event.color || '#3b82f6' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEventClick(event);
+                                }}
+                                title={`${event.title}\n${format(event.start, 'h:mm a')} - ${format(event.end, 'h:mm a')}`}
+                              >
+                                {event.title}
+                              </div>
+                            ))}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
+                              <Plus className="w-4 h-4 text-gray-400/60" />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
@@ -718,23 +762,28 @@ const Calendar: React.FC<CalendarProps> = ({
         </div>
 
         {/* Hours timeline */}
+        {(() => {
+          const hours24 = Array.from({ length: 24 }, (_, i) => i);
+          const gradientStops = hours24
+            .map((h, i) => `${getCellColor(currentDate, h) ?? 'rgb(248,250,252)'} ${((i / 23) * 100).toFixed(1)}%`)
+            .join(', ');
+          const bgGradient = `linear-gradient(to bottom, ${gradientStops})`;
+          return (
         <div
           className="flex-1 overflow-y-auto"
           id="day-view-timeline"
-          style={{ maxHeight: 'calc(100vh - 200px)', minHeight: '600px' }}
+          style={{ maxHeight: 'calc(100vh - 200px)', minHeight: '600px', background: bgGradient }}
         >
           <div className="relative min-h-full">
             {hours.map((hour) => {
               const hourEvents = getEventsForHour(hour);
               const isCurrentHour = isToday && hour === currentHour;
-              const hourColor = getCellColor(currentDate, hour);
 
               return (
                 <div
                   key={hour}
                   id={`hour-${hour}`}
-                  className="relative border-b border-black/5 min-h-[80px] flex hover:brightness-95 transition-all"
-                  style={{ backgroundColor: hourColor ?? 'white' }}
+                  className="relative border-b border-black/[0.05] min-h-[80px] flex hover:bg-white/10 transition-colors"
                   onMouseEnter={() => setHoveredDate(currentDate)}
                   onMouseLeave={() => setHoveredDate(null)}
                 >
@@ -817,6 +866,8 @@ const Calendar: React.FC<CalendarProps> = ({
             })}
           </div>
         </div>
+          );
+        })()}
       </div>
     );
   };

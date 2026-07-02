@@ -233,16 +233,5 @@ export interface DayCacheEntry {
 export interface AppError {
   code: string;
   message: string;
-  details?: any;
-}
-
-// Context Types
-export interface AppContextType {
-  calendars: Calendar[];
-  events: CalendarEvent[];
-  weatherData: WeatherForecast | null;
-  location: Location | null;
-  viewState: CalendarViewState;
-  isLoading: boolean;
-  error: AppError | null;
+  details?: unknown;
 }

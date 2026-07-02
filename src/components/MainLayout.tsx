@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useApp } from '../contexts/AppContext';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useApp } from '../contexts/useApp';
 import Calendar from './Calendar';
 import WeatherHeatmapBackground from './WeatherHeatmapBackground';
 import EventModal from './EventModal';
@@ -31,14 +31,19 @@ const MainLayout: React.FC = () => {
   const [eventModalDate, setEventModalDate] = useState<Date | null>(null);
   const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
 
-  // Generate weather heatmap data
-  const weatherHeatmap = weatherData?.hourly && weatherData?.daily?.[0]
-    ? generateWeatherHeatmap(
-        weatherData.hourly,
-        weatherData.daily[0].sunrise,
-        weatherData.daily[0].sunset,
-      )
-    : undefined;
+  // Generate weather heatmap data (memoized so it keeps a stable identity
+  // across renders unless the underlying weather data actually changes)
+  const weatherHeatmap = useMemo(
+    () =>
+      weatherData?.hourly && weatherData?.daily?.[0]
+        ? generateWeatherHeatmap(
+            weatherData.hourly,
+            weatherData.daily[0].sunrise,
+            weatherData.daily[0].sunset,
+          )
+        : undefined,
+    [weatherData],
+  );
 
   // Fetch Open-Meteo data for the currently visible date range
   useEffect(() => {
@@ -177,10 +182,8 @@ const MainLayout: React.FC = () => {
           onEventClick={handleEventClick}
           onDateClick={handleDateClick}
           onCreateEvent={handleCreateEvent}
-          weatherHeatmap={weatherHeatmap}
           weatherData={weatherData}
           dayWeatherCache={dayWeatherCache}
-          onRefreshWeather={refreshWeatherData}
           className="h-full"
         />
       </main>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from '../contexts/AppContext';
+import { useApp } from '../contexts/useApp';
 import type { CalendarEvent } from '../types';
 import { format } from 'date-fns';
 import { X, Trash2, Calendar as CalendarIcon, Clock, MapPin } from 'lucide-react';
