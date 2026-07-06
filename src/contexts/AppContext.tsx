@@ -9,7 +9,18 @@ const STORAGE_KEYS = {
   events: 'kalendarski_events',
   calendars: 'kalendarski_calendars',
   dayWeather: 'kalendarski_day_weather',
+  theme: 'kalendarski_theme',
 } as const;
+
+export type Theme = 'light' | 'dark';
+
+function loadTheme(): Theme {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.theme);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch { /* ignore */ }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
 
 const DATE_FIELDS_EVENT = ['start', 'end', 'createdAt', 'updatedAt'] as const;
 const DATE_FIELDS_CALENDAR = ['createdAt', 'updatedAt', 'lastSync'] as const;
@@ -56,6 +67,7 @@ export interface AppState {
   isLoading: boolean;
   error: AppError | null;
   dayWeatherCache: Record<string, DayCacheEntry>;
+  theme: Theme;
 }
 
 function loadDayWeatherCache(): Record<string, DayCacheEntry> {
@@ -76,6 +88,7 @@ const initialState: AppState = {
   isLoading: false,
   error: null,
   dayWeatherCache: loadDayWeatherCache(),
+  theme: loadTheme(),
 };
 
 // Action types
@@ -93,7 +106,9 @@ export type AppAction =
   | { type: 'SET_WEATHER_DATA'; payload: WeatherForecast }
   | { type: 'SET_LOCATION'; payload: Location }
   | { type: 'SET_VIEW_STATE'; payload: CalendarViewState }
-  | { type: 'MERGE_DAY_WEATHER'; payload: Record<string, DayCacheEntry> };
+  | { type: 'MERGE_DAY_WEATHER'; payload: Record<string, DayCacheEntry> }
+  | { type: 'CLEAR_DAY_WEATHER' }
+  | { type: 'SET_THEME'; payload: Theme };
 
 // Reducer
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -156,6 +171,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
 
     case 'MERGE_DAY_WEATHER':
       return { ...state, dayWeatherCache: { ...state.dayWeatherCache, ...action.payload } };
+
+    case 'CLEAR_DAY_WEATHER':
+      return { ...state, dayWeatherCache: {} };
+
+    case 'SET_THEME':
+      return { ...state, theme: action.payload };
 
     default:
       return state;
@@ -243,6 +264,44 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     }
   };
 
+  // Manually change the weather location (e.g. from the location picker),
+  // clearing the day-weather cache since it's not keyed by location.
+  const setLocation = async (newLocation: Location) => {
+    dispatch({ type: 'CLEAR_DAY_WEATHER' });
+    try {
+      localStorage.removeItem(STORAGE_KEYS.dayWeather);
+    } catch { /* ignore quota errors */ }
+
+    try {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+
+      const weatherData = await getWeatherData(newLocation);
+
+      dispatch({ type: 'SET_WEATHER_DATA', payload: weatherData });
+      dispatch({ type: 'SET_LOCATION', payload: weatherData.location });
+    } catch (error) {
+      const appError: AppError = {
+        code: 'WEATHER_FETCH_ERROR',
+        message: error instanceof Error ? error.message : 'Failed to fetch weather data',
+        details: error,
+      };
+      dispatch({ type: 'SET_ERROR', payload: appError });
+      // Still record the requested location even if the weather fetch failed
+      dispatch({ type: 'SET_LOCATION', payload: newLocation });
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
+  // Theme actions
+  const setTheme = (theme: Theme) => {
+    dispatch({ type: 'SET_THEME', payload: theme });
+    try {
+      localStorage.setItem(STORAGE_KEYS.theme, theme);
+    } catch { /* ignore quota errors */ }
+  };
+
   // View actions
   const setViewState = (viewState: CalendarViewState) => {
     dispatch({ type: 'SET_VIEW_STATE', payload: viewState });
@@ -270,6 +329,11 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       // Silently ignore — weather data is decorative, not critical
     }
   };
+
+  // Apply the theme class to the document root
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', state.theme === 'dark');
+  }, [state.theme]);
 
   // Persist events and calendars to localStorage on every change
   useEffect(() => {
@@ -374,7 +438,9 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     deleteEvent,
     refreshWeatherData,
     fetchWeatherForDates,
+    setLocation,
     setViewState,
+    setTheme,
   };
 
   return (

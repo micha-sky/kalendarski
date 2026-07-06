@@ -125,17 +125,17 @@ const EventModal: React.FC<EventModalProps> = ({
         />
 
         {/* Modal */}
-        <div className="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-xl rounded-2xl">
+        <div className="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white dark:bg-gray-800 shadow-xl rounded-2xl">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-medium text-gray-900">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
               {event ? 'Edit Event' : 'New Event'}
             </h3>
             <div className="flex items-center space-x-2">
               {event && onDelete && (
                 <button
                   onClick={onDelete}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg transition-colors"
                   aria-label="Delete event"
                 >
                   <Trash2 size={16} />
@@ -143,7 +143,7 @@ const EventModal: React.FC<EventModalProps> = ({
               )}
               <button
                 onClick={onClose}
-                className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 aria-label="Close"
               >
                 <X size={16} />
@@ -155,7 +155,7 @@ const EventModal: React.FC<EventModalProps> = ({
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Title */}
             <div>
-              <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Title *
               </label>
               <input
@@ -163,7 +163,7 @@ const EventModal: React.FC<EventModalProps> = ({
                 id="title"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Event title"
                 required
               />
@@ -171,7 +171,7 @@ const EventModal: React.FC<EventModalProps> = ({
 
             {/* Calendar Selection */}
             <div>
-              <label htmlFor="calendar" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="calendar" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 <CalendarIcon size={16} className="inline mr-1" />
                 Calendar
               </label>
@@ -180,13 +180,13 @@ const EventModal: React.FC<EventModalProps> = ({
                 value={formData.calendarId}
                 onChange={(e) => {
                   const selectedCalendar = calendars.find(cal => cal.id === e.target.value);
-                  setFormData({ 
-                    ...formData, 
+                  setFormData({
+                    ...formData,
                     calendarId: e.target.value,
                     color: selectedCalendar?.color || formData.color
                   });
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 {calendars.map((calendar) => (
                   <option key={calendar.id} value={calendar.id}>
@@ -203,9 +203,9 @@ const EventModal: React.FC<EventModalProps> = ({
                 id="allDay"
                 checked={formData.allDay}
                 onChange={(e) => setFormData({ ...formData, allDay: e.target.checked })}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded"
               />
-              <label htmlFor="allDay" className="ml-2 block text-sm text-gray-700">
+              <label htmlFor="allDay" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
                 All day
               </label>
             </div>
@@ -213,42 +213,42 @@ const EventModal: React.FC<EventModalProps> = ({
             {/* Date and Time */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="start" className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="start" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   <Clock size={16} className="inline mr-1" />
                   Start
                 </label>
                 <input
                   type={formData.allDay ? 'date' : 'datetime-local'}
                   id="start"
-                  value={formData.allDay 
+                  value={formData.allDay
                     ? format(formData.start, 'yyyy-MM-dd')
                     : format(formData.start, "yyyy-MM-dd'T'HH:mm")
                   }
                   onChange={(e) => handleDateTimeChange('start', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
-              
+
               <div>
-                <label htmlFor="end" className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="end" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   End
                 </label>
                 <input
                   type={formData.allDay ? 'date' : 'datetime-local'}
                   id="end"
-                  value={formData.allDay 
+                  value={formData.allDay
                     ? format(formData.end, 'yyyy-MM-dd')
                     : format(formData.end, "yyyy-MM-dd'T'HH:mm")
                   }
                   onChange={(e) => handleDateTimeChange('end', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
             </div>
 
             {/* Location */}
             <div>
-              <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="location" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 <MapPin size={16} className="inline mr-1" />
                 Location
               </label>
@@ -257,14 +257,14 @@ const EventModal: React.FC<EventModalProps> = ({
                 id="location"
                 value={formData.location}
                 onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Event location"
               />
             </div>
 
             {/* Description */}
             <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Description
               </label>
               <textarea
@@ -272,7 +272,7 @@ const EventModal: React.FC<EventModalProps> = ({
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Event description"
               />
             </div>
@@ -282,7 +282,7 @@ const EventModal: React.FC<EventModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
               >
                 Cancel
               </button>

@@ -1,6 +1,6 @@
 import { createContext, useContext, type Dispatch } from 'react';
-import type { Calendar, CalendarEvent, CalendarViewState } from '../types';
-import type { AppState, AppAction } from './AppContext';
+import type { Calendar, CalendarEvent, CalendarViewState, Location } from '../types';
+import type { AppState, AppAction, Theme } from './AppContext';
 
 // The full value exposed through AppContext: reducer state plus action helpers.
 export interface AppContextType extends AppState {
@@ -16,8 +16,11 @@ export interface AppContextType extends AppState {
   // Weather actions
   refreshWeatherData: () => Promise<void>;
   fetchWeatherForDates: (startDate: Date, endDate: Date) => Promise<void>;
+  setLocation: (location: Location) => Promise<void>;
   // View actions
   setViewState: (viewState: CalendarViewState) => void;
+  // Theme actions
+  setTheme: (theme: Theme) => void;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);

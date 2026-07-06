@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import type { CalendarEvent, CalendarViewState, WeatherForecast, DayCacheEntry } from '../types';
 import { clsx } from 'clsx';
 import { temperatureToRgba, interpolateDailyTemp, temperatureToRgbaEnhanced, daytimeColorFromRange } from '../utils/weatherHeatmap';
+import { useApp } from '../contexts/useApp';
 
 interface CalendarProps {
   events: CalendarEvent[];
@@ -77,7 +78,11 @@ const Calendar: React.FC<CalendarProps> = ({
   dayWeatherCache,
   className,
 }) => {
+  const { theme } = useApp();
   const [hoveredDate, setHoveredDate] = useState<Date | null>(null);
+  // Fallback cell color used where there's no weather data to derive a gradient from
+  const emptyCellColor = theme === 'dark' ? 'rgb(31,41,55)' : 'rgb(248,250,252)';
+  const outOfMonthCellColor = theme === 'dark' ? 'rgb(17,24,39)' : 'rgb(243,244,246)';
 
   // Period-wide temp range (for month-view cross-day normalization)
   const { periodMin, periodMax } = useMemo(() => {
@@ -290,17 +295,17 @@ const Calendar: React.FC<CalendarProps> = ({
     const colorGrid: string[][] = Array.from({ length: numWeeks }, (_, r) =>
       days.slice(r * 7, (r + 1) * 7).map(day =>
         isSameMonth(day, currentDate)
-          ? (getCellColor(day) ?? 'rgb(248,250,252)')
-          : 'rgb(243,244,246)'
+          ? (getCellColor(day) ?? emptyCellColor)
+          : outOfMonthCellColor
       )
     );
 
     return (
-      <div className="flex-1 rounded-lg shadow-sm border border-white/30 overflow-hidden">
+      <div className="flex-1 rounded-lg shadow-sm border border-white/30 dark:border-gray-700/30 overflow-hidden">
         {/* Week day headers */}
-        <div className="grid grid-cols-7 bg-white/70 backdrop-blur-sm border-b border-white/30">
+        <div className="grid grid-cols-7 bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm border-b border-white/30 dark:border-gray-700/30">
           {weekDays.map(day => (
-            <div key={day} className="p-3 text-center text-sm font-medium text-gray-600">
+            <div key={day} className="p-3 text-center text-sm font-medium text-gray-600 dark:text-gray-400">
               {day}
             </div>
           ))}
@@ -322,9 +327,9 @@ const Calendar: React.FC<CalendarProps> = ({
               <div
                 key={day.toISOString()}
                 className={clsx(
-                  'relative min-h-[100px] p-2 border-r border-b border-black/[0.06] cursor-pointer z-[1]',
+                  'relative min-h-[100px] p-2 border-r border-b border-black/[0.06] dark:border-white/[0.08] cursor-pointer z-[1]',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
-                  { 'text-gray-400': !isCurrentMonth }
+                  { 'text-gray-400 dark:text-gray-500': !isCurrentMonth }
                 )}
                 onClick={() => onDateClick(day)}
                 onMouseEnter={() => setHoveredDate(day)}
@@ -338,7 +343,7 @@ const Calendar: React.FC<CalendarProps> = ({
                   <div className="absolute inset-0 ring-2 ring-inset ring-blue-400/60 pointer-events-none rounded-sm" style={{ zIndex: 20 }} />
                 )}
                 {isHovered && !isSelected && (
-                  <div className="absolute inset-0 bg-white/20 pointer-events-none" style={{ zIndex: 20 }} />
+                  <div className="absolute inset-0 bg-white/20 dark:bg-white/10 pointer-events-none" style={{ zIndex: 20 }} />
                 )}
 
                 {/* Date number + weather badge / add button */}
@@ -348,8 +353,8 @@ const Calendar: React.FC<CalendarProps> = ({
                       'text-sm font-medium leading-none',
                       {
                         'text-white bg-blue-500 rounded-full w-6 h-6 flex items-center justify-center shadow-sm': isTodayDate,
-                        'text-gray-800': isCurrentMonth && !isTodayDate,
-                        'text-gray-400': !isCurrentMonth,
+                        'text-gray-800 dark:text-gray-200': isCurrentMonth && !isTodayDate,
+                        'text-gray-400 dark:text-gray-500': !isCurrentMonth,
                       }
                     )}
                   >
@@ -358,11 +363,11 @@ const Calendar: React.FC<CalendarProps> = ({
 
                   <div className="flex flex-col items-end gap-0.5">
                     {dayWeather && !isHovered && (
-                      <div className="flex items-center gap-0.5 text-[9px] leading-none text-gray-700/80">
+                      <div className="flex items-center gap-0.5 text-[9px] leading-none text-gray-700/80 dark:text-gray-300/80">
                         <span>{dayWeather.emoji}</span>
                         <span className="font-medium">{dayWeather.temp}°</span>
                         {dayWeather.rainPercent > 0 && (
-                          <span className="text-blue-600/80">💧{dayWeather.rainPercent}%</span>
+                          <span className="text-blue-600/80 dark:text-blue-400/80">💧{dayWeather.rainPercent}%</span>
                         )}
                       </div>
                     )}
@@ -399,7 +404,7 @@ const Calendar: React.FC<CalendarProps> = ({
                   ))}
 
                   {dayEvents.length > 3 && (
-                    <div className="text-xs text-gray-700 px-2 bg-white/50 rounded inline-block">
+                    <div className="text-xs text-gray-700 dark:text-gray-300 px-2 bg-white/50 dark:bg-gray-800/50 rounded inline-block">
                       +{dayEvents.length - 3} more
                     </div>
                   )}
@@ -432,27 +437,27 @@ const Calendar: React.FC<CalendarProps> = ({
     return (
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <h1 className="text-2xl font-semibold text-gray-900">{getTitle()}</h1>
-          
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{getTitle()}</h1>
+
           <div className="flex items-center space-x-1">
             <button
               onClick={navigatePrevious}
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               aria-label="Previous"
             >
               <ChevronLeft size={20} />
             </button>
-            
+
             <button
               onClick={navigateToday}
-              className="px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              className="px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950 rounded-lg transition-colors"
             >
               Today
             </button>
-            
+
             <button
               onClick={navigateNext}
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               aria-label="Next"
             >
               <ChevronRight size={20} />
@@ -462,7 +467,7 @@ const Calendar: React.FC<CalendarProps> = ({
 
         <div className="flex items-center space-x-2">
           {/* View type selector */}
-          <div className="flex bg-gray-100 rounded-lg p-1">
+          <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
             {(['month', 'week', 'day', 'agenda'] as const).map((type) => (
               <button
                 key={type}
@@ -470,8 +475,8 @@ const Calendar: React.FC<CalendarProps> = ({
                 className={clsx(
                   'px-3 py-1 text-sm font-medium rounded-md transition-colors capitalize',
                   {
-                    'bg-white text-gray-900 shadow-sm': viewType === type,
-                    'text-gray-600 hover:text-gray-900': viewType !== type,
+                    'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm': viewType === type,
+                    'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100': viewType !== type,
                   }
                 )}
               >
@@ -540,20 +545,20 @@ const Calendar: React.FC<CalendarProps> = ({
     };
 
     return (
-      <div className="flex-1 rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <div className="flex-1 rounded-lg shadow-sm border border-white/30 dark:border-gray-700/30 overflow-hidden">
         {/* Week view header */}
-        <div className="bg-white border-b border-gray-200">
+        <div className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm border-b border-white/30 dark:border-gray-700/30">
           {/* Week title */}
-          <div className="p-4 border-b border-gray-100">
-            <h2 className="text-lg font-semibold text-gray-900">
+          <div className="p-4 border-b border-black/[0.06] dark:border-white/[0.08]">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {format(weekStart, 'MMM d')} - {format(weekEnd, 'MMM d, yyyy')}
             </h2>
           </div>
 
           {/* Day headers */}
-          <div className="grid grid-cols-8 border-b border-gray-200">
+          <div className="grid grid-cols-8 border-b border-black/[0.06] dark:border-white/[0.08]">
             {/* Time column header */}
-            <div className="p-3 text-center text-sm font-medium text-gray-500 border-r border-gray-200">
+            <div className="p-3 text-center text-sm font-medium text-gray-500 dark:text-gray-400 border-r border-black/[0.06] dark:border-white/[0.08]">
               Time
             </div>
 
@@ -567,9 +572,9 @@ const Calendar: React.FC<CalendarProps> = ({
                 <div
                   key={day.toISOString()}
                   className={clsx(
-                    'p-2 text-center border-r border-gray-200 last:border-r-0 cursor-pointer hover:bg-gray-50 transition-colors',
+                    'p-2 text-center border-r border-black/[0.06] dark:border-white/[0.08] last:border-r-0 cursor-pointer hover:bg-white/40 dark:hover:bg-white/5 transition-colors',
                     {
-                      'bg-blue-50 border-blue-200': isCurrentDay,
+                      'bg-blue-50/70 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800': isCurrentDay,
                     }
                   )}
                   onClick={() => onDateClick(day)}
@@ -577,8 +582,8 @@ const Calendar: React.FC<CalendarProps> = ({
                   <div className={clsx(
                     'text-xs font-medium',
                     {
-                      'text-blue-600': isCurrentDay,
-                      'text-gray-900': !isCurrentDay,
+                      'text-blue-600 dark:text-blue-400': isCurrentDay,
+                      'text-gray-900 dark:text-gray-100': !isCurrentDay,
                     }
                   )}>
                     {format(day, 'EEE')}
@@ -586,23 +591,23 @@ const Calendar: React.FC<CalendarProps> = ({
                   <div className={clsx(
                     'text-lg font-semibold mt-0.5',
                     {
-                      'text-blue-600': isCurrentDay,
-                      'text-gray-700': !isCurrentDay,
+                      'text-blue-600 dark:text-blue-400': isCurrentDay,
+                      'text-gray-700 dark:text-gray-300': !isCurrentDay,
                     }
                   )}>
                     {format(day, 'd')}
                   </div>
                   {dayWeather && (
-                    <div className="flex items-center justify-center gap-0.5 text-[9px] leading-none text-gray-600 mt-1">
+                    <div className="flex items-center justify-center gap-0.5 text-[9px] leading-none text-gray-600 dark:text-gray-400 mt-1">
                       <span>{dayWeather.emoji}</span>
                       <span>{dayWeather.temp}°</span>
                       {dayWeather.rainPercent > 0 && (
-                        <span className="text-blue-500">💧{dayWeather.rainPercent}%</span>
+                        <span className="text-blue-500 dark:text-blue-400">💧{dayWeather.rainPercent}%</span>
                       )}
                     </div>
                   )}
                   {dayEvents.length > 0 && (
-                    <div className="text-[9px] text-gray-400 mt-0.5">
+                    <div className="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5">
                       {dayEvents.length} event{dayEvents.length !== 1 ? 's' : ''}
                     </div>
                   )}
@@ -613,10 +618,10 @@ const Calendar: React.FC<CalendarProps> = ({
 
           {/* All-day events section */}
           {getAllDayEvents().length > 0 && (
-            <div className="border-b border-gray-200 bg-gray-50/50">
+            <div className="border-b border-black/[0.06] dark:border-white/[0.08] bg-gray-50/50 dark:bg-gray-800/30">
               <div className="grid grid-cols-8">
                 {/* All-day label */}
-                <div className="p-2 text-center text-xs font-medium text-gray-500 border-r border-gray-200 flex items-center justify-center">
+                <div className="p-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 border-r border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center">
                   All Day
                 </div>
 
@@ -627,7 +632,7 @@ const Calendar: React.FC<CalendarProps> = ({
                   return (
                     <div
                       key={`allday-${day.toISOString()}`}
-                      className="p-1 border-r border-gray-200 last:border-r-0 min-h-[40px]"
+                      className="p-1 border-r border-black/[0.06] dark:border-white/[0.08] last:border-r-0 min-h-[40px]"
                     >
                       {dayAllDayEvents.map((event) => (
                         <div
@@ -656,7 +661,7 @@ const Calendar: React.FC<CalendarProps> = ({
           {/* Gradient canvas covers the 7 day columns (skips the 12.5% time column) */}
           {(() => {
             const weekColorGrid: string[][] = Array.from({ length: 24 }, (_, hour) =>
-              weekDays.map(day => getCellColor(day, hour) ?? 'rgb(248,250,252)')
+              weekDays.map(day => getCellColor(day, hour) ?? emptyCellColor)
             );
             return (
               <div className="relative">
@@ -669,12 +674,12 @@ const Calendar: React.FC<CalendarProps> = ({
                   return (
                     <div
                       key={hour}
-                      className="grid grid-cols-8 border-b border-black/[0.05] min-h-[60px]"
+                      className="grid grid-cols-8 border-b border-black/[0.05] dark:border-white/[0.06] min-h-[60px]"
                     >
                       {/* Time column — opaque so it stays legible */}
-                      <div className="p-2 text-center text-sm text-gray-500 border-r border-black/[0.07] flex items-center justify-center bg-white/80 backdrop-blur-sm">
+                      <div className="p-2 text-center text-sm text-gray-500 dark:text-gray-400 border-r border-black/[0.07] dark:border-white/[0.08] flex items-center justify-center bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
                         <div>
-                          <div className={clsx('font-medium', isCurrentHour && 'text-blue-600')}>
+                          <div className={clsx('font-medium', isCurrentHour ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-200')}>
                             {hour === 0 ? '12' : hour > 12 ? hour - 12 : hour}
                           </div>
                           <div className="text-xs">{hour < 12 ? 'AM' : 'PM'}</div>
@@ -688,8 +693,8 @@ const Calendar: React.FC<CalendarProps> = ({
                           <div
                             key={`${day.toISOString()}-${hour}`}
                             className={clsx(
-                              'relative border-r border-black/[0.05] last:border-r-0 p-1 cursor-pointer z-[1]',
-                              'hover:bg-white/20 transition-colors',
+                              'relative border-r border-black/[0.05] dark:border-white/[0.06] last:border-r-0 p-1 cursor-pointer z-[1]',
+                              'hover:bg-white/20 dark:hover:bg-white/5 transition-colors',
                               isCurrentHour && 'ring-1 ring-inset ring-blue-400/40'
                             )}
                             onClick={() => {
@@ -746,15 +751,15 @@ const Calendar: React.FC<CalendarProps> = ({
     };
 
     return (
-      <div className="flex-1 rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <div className="flex-1 rounded-lg shadow-sm border border-white/30 dark:border-gray-700/30 overflow-hidden">
         {/* Day view header */}
-        <div className="bg-white border-b border-gray-200 p-4">
+        <div className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm border-b border-white/30 dark:border-gray-700/30 p-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {format(currentDate, 'EEEE, MMMM d, yyyy')}
             </h2>
             {isToday && (
-              <div className="text-sm text-blue-600 font-medium">
+              <div className="text-sm text-blue-600 dark:text-blue-400 font-medium">
                 {format(new Date(), 'HH:mm')}
               </div>
             )}
@@ -765,7 +770,7 @@ const Calendar: React.FC<CalendarProps> = ({
         {(() => {
           const hours24 = Array.from({ length: 24 }, (_, i) => i);
           const gradientStops = hours24
-            .map((h, i) => `${getCellColor(currentDate, h) ?? 'rgb(248,250,252)'} ${((i / 23) * 100).toFixed(1)}%`)
+            .map((h, i) => `${getCellColor(currentDate, h) ?? emptyCellColor} ${((i / 23) * 100).toFixed(1)}%`)
             .join(', ');
           const bgGradient = `linear-gradient(to bottom, ${gradientStops})`;
           return (
@@ -783,7 +788,7 @@ const Calendar: React.FC<CalendarProps> = ({
                 <div
                   key={hour}
                   id={`hour-${hour}`}
-                  className="relative border-b border-black/[0.05] min-h-[80px] flex hover:bg-white/10 transition-colors"
+                  className="relative border-b border-black/[0.05] dark:border-white/[0.06] min-h-[80px] flex hover:bg-white/10 dark:hover:bg-white/5 transition-colors"
                   onMouseEnter={() => setHoveredDate(currentDate)}
                   onMouseLeave={() => setHoveredDate(null)}
                 >
@@ -793,11 +798,11 @@ const Calendar: React.FC<CalendarProps> = ({
                   )}
 
                   {/* Time column */}
-                  <div className="w-24 flex-shrink-0 p-3 border-r border-black/10 bg-white/80 backdrop-blur-sm">
-                    <div className={clsx('text-sm font-medium', isCurrentHour ? 'text-blue-600' : 'text-gray-900')}>
+                  <div className="w-24 flex-shrink-0 p-3 border-r border-black/10 dark:border-white/10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
+                    <div className={clsx('text-sm font-medium', isCurrentHour ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-200')}>
                       {format(new Date().setHours(hour, 0, 0, 0), 'HH:mm')}
                     </div>
-                    <div className={clsx('text-xs', isCurrentHour ? 'text-blue-500' : 'text-gray-500')}>
+                    <div className={clsx('text-xs', isCurrentHour ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400')}>
                       {format(new Date().setHours(hour, 0, 0, 0), 'h a')}
                     </div>
                   </div>
@@ -885,7 +890,7 @@ const Calendar: React.FC<CalendarProps> = ({
 
     if (windowEvents.length === 0) {
       return (
-        <div className="flex-1 flex items-center justify-center text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
           No events in the next 60 days
         </div>
       );
@@ -900,7 +905,7 @@ const Calendar: React.FC<CalendarProps> = ({
     }
 
     return (
-      <div className="flex-1 overflow-auto rounded-lg border border-gray-200 bg-white/80 backdrop-blur-sm divide-y divide-gray-100">
+      <div className="flex-1 overflow-auto rounded-lg border border-white/30 dark:border-gray-700/30 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm divide-y divide-gray-100 dark:divide-gray-700">
         {Array.from(groups.entries()).map(([key, dayEvents]) => {
           const date = new Date(key);
           const todayDate = isToday(date);
@@ -909,30 +914,30 @@ const Calendar: React.FC<CalendarProps> = ({
             <div key={key} className="flex">
               {/* Date column */}
               <div className={clsx(
-                'w-36 flex-shrink-0 p-3 border-r border-gray-100',
-                todayDate ? 'bg-blue-50' : 'bg-gray-50/50'
+                'w-36 flex-shrink-0 p-3 border-r border-gray-100 dark:border-gray-700',
+                todayDate ? 'bg-blue-50 dark:bg-blue-950/50' : 'bg-gray-50/50 dark:bg-gray-800/30'
               )}>
-                <div className={clsx('text-sm font-semibold', todayDate ? 'text-blue-600' : 'text-gray-900')}>
+                <div className={clsx('text-sm font-semibold', todayDate ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-100')}>
                   {format(date, 'EEE, MMM d')}
                 </div>
-                {todayDate && <div className="text-xs text-blue-500 mt-0.5">Today</div>}
+                {todayDate && <div className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">Today</div>}
                 {dayWeather && (
-                  <div className="flex items-center gap-0.5 text-[10px] leading-none text-gray-500 mt-1.5">
+                  <div className="flex items-center gap-0.5 text-[10px] leading-none text-gray-500 dark:text-gray-400 mt-1.5">
                     <span>{dayWeather.emoji}</span>
                     <span>{dayWeather.temp}°</span>
                     {dayWeather.rainPercent > 0 && (
-                      <span className="text-blue-500 ml-0.5">💧{dayWeather.rainPercent}%</span>
+                      <span className="text-blue-500 dark:text-blue-400 ml-0.5">💧{dayWeather.rainPercent}%</span>
                     )}
                   </div>
                 )}
               </div>
 
               {/* Events column */}
-              <div className="flex-1 divide-y divide-gray-50">
+              <div className="flex-1 divide-y divide-gray-50 dark:divide-gray-800">
                 {dayEvents.map(event => (
                   <div
                     key={event.id}
-                    className="flex items-center px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                    className="flex items-center px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
                     onClick={() => onEventClick(event)}
                   >
                     <div
@@ -940,12 +945,12 @@ const Calendar: React.FC<CalendarProps> = ({
                       style={{ backgroundColor: event.color || '#3b82f6' }}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">{event.title}</div>
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{event.title}</div>
                       {event.location && (
-                        <div className="text-xs text-gray-500 truncate mt-0.5">📍 {event.location}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">📍 {event.location}</div>
                       )}
                     </div>
-                    <div className="text-xs text-gray-500 ml-3 flex-shrink-0">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 ml-3 flex-shrink-0">
                       {event.allDay ? 'All day' : `${format(event.start, 'HH:mm')} – ${format(event.end, 'HH:mm')}`}
                     </div>
                   </div>

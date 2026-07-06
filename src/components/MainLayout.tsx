@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../contexts/useApp';
 import Calendar from './Calendar';
-import WeatherHeatmapBackground from './WeatherHeatmapBackground';
 import EventModal from './EventModal';
+import LocationPicker from './LocationPicker';
 import type { CalendarEvent } from '../types';
-import { generateWeatherHeatmap } from '../utils/weatherHeatmap';
+import { Sun, Moon } from 'lucide-react';
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
 } from 'date-fns';
@@ -16,12 +16,15 @@ const MainLayout: React.FC = () => {
     viewState,
     location,
     dayWeatherCache,
+    theme,
     setViewState,
     addEvent,
     updateEvent,
     deleteEvent,
     refreshWeatherData,
     fetchWeatherForDates,
+    setLocation,
+    setTheme,
     error,
     isLoading,
   } = useApp();
@@ -30,20 +33,6 @@ const MainLayout: React.FC = () => {
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [eventModalDate, setEventModalDate] = useState<Date | null>(null);
   const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
-
-  // Generate weather heatmap data (memoized so it keeps a stable identity
-  // across renders unless the underlying weather data actually changes)
-  const weatherHeatmap = useMemo(
-    () =>
-      weatherData?.hourly && weatherData?.daily?.[0]
-        ? generateWeatherHeatmap(
-            weatherData.hourly,
-            weatherData.daily[0].sunrise,
-            weatherData.daily[0].sunset,
-          )
-        : undefined,
-    [weatherData],
-  );
 
   // Fetch Open-Meteo data for the currently visible date range
   useEffect(() => {
@@ -113,24 +102,12 @@ const MainLayout: React.FC = () => {
   const showWeatherError = error?.code === 'WEATHER_FETCH_ERROR' && !weatherErrorDismissed;
 
   return (
-    <div className="h-screen bg-gray-50 relative overflow-hidden flex flex-col">
-      {/* Weather Heatmap Background */}
-      <WeatherHeatmapBackground
-        heatmapData={weatherHeatmap}
-        weatherData={weatherData}
-      />
-
+    <div className="h-screen bg-white dark:bg-gray-900 relative overflow-hidden flex flex-col">
       {/* Slim top bar */}
-      <header className="relative z-10 glass border-b border-white/20 px-4 py-2 flex items-center justify-between flex-shrink-0">
+      <header className="relative z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold text-gray-900">Kalendarski</h1>
-          {weatherData?.location && (
-            <span className="text-xs text-gray-500">
-              {weatherData.location.city && weatherData.location.country
-                ? `${weatherData.location.city}, ${weatherData.location.country}`
-                : `${weatherData.location.latitude.toFixed(2)}, ${weatherData.location.longitude.toFixed(2)}`}
-            </span>
-          )}
+          <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Kalendarski</h1>
+          <LocationPicker currentLocation={weatherData?.location ?? location} onSelect={setLocation} />
         </div>
 
         <div className="flex items-center gap-3">
@@ -138,22 +115,29 @@ const MainLayout: React.FC = () => {
             <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-blue-600" />
           )}
           {weatherData?.current && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-600">
+            <div className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
               <img
                 src={`https://openweathermap.org/img/wn/${weatherData.current.icon}.png`}
                 alt={weatherData.current.condition.description}
                 className="w-6 h-6"
               />
               <span className="font-medium">{Math.round(weatherData.current.temperature)}°C</span>
-              <span className="text-gray-400 capitalize">{weatherData.current.condition.description}</span>
+              <span className="text-gray-400 dark:text-gray-500 capitalize">{weatherData.current.condition.description}</span>
             </div>
           )}
+          <button
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Toggle theme"
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
         </div>
       </header>
 
       {/* Weather error banner */}
       {showWeatherError && (
-        <div className="relative z-10 flex items-center justify-between px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-800 flex-shrink-0">
+        <div className="relative z-10 flex items-center justify-between px-4 py-2 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex-shrink-0">
           <span>{error!.message}</span>
           <div className="flex items-center gap-3 ml-4">
             <button
@@ -164,7 +148,7 @@ const MainLayout: React.FC = () => {
             </button>
             <button
               onClick={() => setWeatherErrorDismissed(true)}
-              className="text-amber-600 hover:text-amber-800"
+              className="text-amber-600 dark:text-amber-300 hover:text-amber-800 dark:hover:text-amber-100"
               aria-label="Dismiss"
             >
               ✕
