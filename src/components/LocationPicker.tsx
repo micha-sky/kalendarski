@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MapPin, Search, LocateFixed, Loader2 } from 'lucide-react';
 import { searchLocations, type GeocodingResult } from '../services/geocodingService';
-import { getCurrentLocation } from '../services/weatherService';
+import { getCurrentLocation, reverseGeocode } from '../services/weatherService';
 import type { Location } from '../types';
 
 interface LocationPickerProps {
@@ -69,7 +69,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({ currentLocation, onSele
     setIsLocating(true);
     setSearchError(null);
     try {
-      const location = await getCurrentLocation();
+      const location = await reverseGeocode(await getCurrentLocation());
       handleSelect(location);
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : 'Failed to get your location.');

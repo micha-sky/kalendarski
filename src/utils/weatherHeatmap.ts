@@ -234,7 +234,7 @@ function smoothDayFactor(hour: number, sunriseHour: number, sunsetHour: number):
  * High-contrast per-hour color.
  * - Normalises temperature to the day's own min/max so the full palette always spans the day.
  * - Blends towards near-black navy at night, with a smooth dawn/dusk ramp.
- * - Opacity is highest at night (0.55) and lowest at midday (0.37).
+ * - Opacity is highest at night (0.50) and lowest at midday (0.35).
  */
 export function temperatureToRgbaEnhanced(
   temp: number,
@@ -251,8 +251,8 @@ export function temperatureToRgbaEnhanced(
   const dayFactor = smoothDayFactor(hour, sunriseHour, sunsetHour);
   const finalHex  = interpolateColor(NIGHT_HEX, tempHex, dayFactor);
 
-  // More opaque at night so the darkness really reads
-  const opacity = 0.55 - dayFactor * 0.18;
+  // More opaque at night so the darkness still reads
+  const opacity = 0.50 - dayFactor * 0.15;
   return hexToRgba(finalHex, opacity);
 }
 
