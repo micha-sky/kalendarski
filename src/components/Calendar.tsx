@@ -405,8 +405,8 @@ const Calendar: React.FC<CalendarProps> = ({
         case 'month':
           return format(currentDate, 'MMMM yyyy');
         case 'week': {
-          const weekStart = startOfWeek(currentDate);
-          const weekEnd = endOfWeek(currentDate);
+          const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
+          const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
           return `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`;
         }
         case 'day':
@@ -650,7 +650,7 @@ const Calendar: React.FC<CalendarProps> = ({
               <>
                 <GradientCanvas
                   colors={weekColorGrid}
-                  style={{ left: '12.5%', width: '87.5%', top: 0, bottom: 0, height: 'auto' }}
+                  style={{ left: '12.5%', width: '87.5%' }}
                 />
                 {Array.from({ length: 24 }, (_, hour) => {
                   const isCurrentHour = isSameDay(currentDate, today) && hour === currentHour;
