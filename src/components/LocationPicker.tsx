@@ -88,11 +88,11 @@ const LocationPicker: React.FC<LocationPickerProps> = ({ currentLocation, onSele
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setIsOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+        className="flex items-center gap-1.5 min-w-0 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
         aria-label="Change location"
       >
-        <MapPin size={12} />
-        <span>{label}</span>
+        <MapPin size={12} className="flex-shrink-0" />
+        <span className="truncate max-w-[40vw] sm:max-w-none">{label}</span>
       </button>
 
       {isOpen && (

@@ -102,15 +102,15 @@ const MainLayout: React.FC = () => {
   const showWeatherError = error?.code === 'WEATHER_FETCH_ERROR' && !weatherErrorDismissed;
 
   return (
-    <div className="h-screen bg-white dark:bg-gray-900 relative overflow-hidden flex flex-col">
+    <div className="h-dvh bg-white dark:bg-gray-900 relative overflow-hidden flex flex-col">
       {/* Slim top bar */}
-      <header className="relative z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-2 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Kalendarski</h1>
+      <header className="relative z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex-shrink-0">Kalendarski</h1>
           <LocationPicker currentLocation={weatherData?.location ?? location} onSelect={setLocation} />
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           {isLoading && (
             <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-blue-600" />
           )}
@@ -122,7 +122,7 @@ const MainLayout: React.FC = () => {
                 className="w-6 h-6"
               />
               <span className="font-medium">{Math.round(weatherData.current.temperature)}°C</span>
-              <span className="text-gray-400 dark:text-gray-500 capitalize">{weatherData.current.condition.description}</span>
+              <span className="hidden sm:inline text-gray-400 dark:text-gray-500 capitalize">{weatherData.current.condition.description}</span>
             </div>
           )}
           <button
