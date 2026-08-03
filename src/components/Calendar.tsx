@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isToday, addDays, isBefore } from 'date-fns';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import type { CalendarEvent, CalendarViewState, WeatherForecast, DayCacheEntry } from '../types';
@@ -106,7 +106,7 @@ const Calendar: React.FC<CalendarProps> = ({
 
   // Returns an rgba background color for a given day (+ optional hour).
   // Prefers the Open-Meteo day cache (full history + forecast), falls back to OWM data.
-  const getCellColor = (day: Date, hour?: number): string | undefined => {
+  const getCellColor = useCallback((day: Date, hour?: number): string | undefined => {
     const dayKey = format(day, 'yyyy-MM-dd');
 
     // --- Primary: Open-Meteo day cache (covers past + future for any date) ---
@@ -168,7 +168,7 @@ const Calendar: React.FC<CalendarProps> = ({
       if (!dayData) return undefined;
       return temperatureToRgba((dayData.temperatureMin + dayData.temperatureMax) / 2, false, 0.22);
     }
-  };
+  }, [dayWeatherCache, weatherData, periodMin, periodMax]);
 
   // --- Weather badge helpers ---
   const getWeatherEmoji = (cloudPct: number, rainPct: number): string => {
@@ -180,7 +180,7 @@ const Calendar: React.FC<CalendarProps> = ({
     return '☁️';
   };
 
-  const getDayWeather = (day: Date): { temp: number; emoji: string; rainPercent: number } | null => {
+  const getDayWeather = useCallback((day: Date): { temp: number; emoji: string; rainPercent: number } | null => {
     const dayKey = format(day, 'yyyy-MM-dd');
     const entry = dayWeatherCache?.[dayKey];
 
@@ -212,7 +212,7 @@ const Calendar: React.FC<CalendarProps> = ({
     }
 
     return null;
-  };
+  }, [dayWeatherCache, weatherData]);
 
   const { currentDate, viewType } = viewState;
 
@@ -265,22 +265,46 @@ const Calendar: React.FC<CalendarProps> = ({
     });
   };
 
+  // --- Memoized weather-color derivations ---
+  // The per-cell color math (array scans, min/max, interpolation) is expensive, so
+  // it's memoized here and only recomputed when the underlying weather/date deps
+  // change — not on every hover-triggered re-render.
+  const monthDays = useMemo(() => getCalendarDays(), [currentDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-
-  const renderMonthView = () => {
-    const days = getCalendarDays();
-    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const numWeeks = Math.ceil(days.length / 7);
-
-    // 2D color grid for the gradient canvas.
-    // Out-of-month cells get a neutral color so they fade naturally at the edges.
-    const colorGrid: string[][] = Array.from({ length: numWeeks }, (_, r) =>
-      days.slice(r * 7, (r + 1) * 7).map(day =>
+  const monthColorGrid = useMemo<string[][]>(() => {
+    const numWeeks = Math.ceil(monthDays.length / 7);
+    return Array.from({ length: numWeeks }, (_, r) =>
+      monthDays.slice(r * 7, (r + 1) * 7).map(day =>
         isSameMonth(day, currentDate)
           ? (getCellColor(day) ?? emptyCellColor)
           : outOfMonthCellColor
       )
     );
+  }, [monthDays, currentDate, getCellColor, emptyCellColor, outOfMonthCellColor]);
+
+  const weekViewDays = useMemo(() => {
+    const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+    return eachDayOfInterval({ start: weekStart, end: weekEnd });
+  }, [currentDate]);
+
+  const weekColorGrid = useMemo<string[][]>(() =>
+    Array.from({ length: 24 }, (_, hour) =>
+      weekViewDays.map(day => getCellColor(day, hour) ?? emptyCellColor)
+    ),
+  [weekViewDays, getCellColor, emptyCellColor]);
+
+  const dayViewGradient = useMemo(() => {
+    const stops = Array.from({ length: 24 }, (_, h) =>
+      `${getCellColor(currentDate, h) ?? emptyCellColor} ${((h / 23) * 100).toFixed(1)}%`
+    ).join(', ');
+    return `linear-gradient(to bottom, ${stops})`;
+  }, [currentDate, getCellColor, emptyCellColor]);
+
+  const renderMonthView = () => {
+    const days = monthDays;
+    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const colorGrid = monthColorGrid;
 
     return (
       <div className="flex-1 rounded-lg shadow-sm border border-white/30 dark:border-gray-700/30 overflow-hidden">
@@ -313,7 +337,7 @@ const Calendar: React.FC<CalendarProps> = ({
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
                   { 'text-gray-400 dark:text-gray-500': !isCurrentMonth }
                 )}
-                onClick={() => onDateClick(day)}
+                onClick={() => { onDateClick(day); onCreateEvent(day); }}
                 onMouseEnter={() => setHoveredDate(day)}
                 onMouseLeave={() => setHoveredDate(null)}
                 tabIndex={0}
@@ -417,11 +441,11 @@ const Calendar: React.FC<CalendarProps> = ({
     };
 
     return (
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{getTitle()}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2 gap-y-3">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <h1 className="text-lg sm:text-2xl font-semibold text-gray-900 dark:text-gray-100 truncate">{getTitle()}</h1>
 
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-1 flex-shrink-0">
             <button
               onClick={navigatePrevious}
               className="p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -447,7 +471,7 @@ const Calendar: React.FC<CalendarProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {/* View type selector */}
           <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
             {(['month', 'week', 'day', 'agenda'] as const).map((type) => (
@@ -455,7 +479,7 @@ const Calendar: React.FC<CalendarProps> = ({
                 key={type}
                 onClick={() => onViewStateChange({ ...viewState, viewType: type })}
                 className={clsx(
-                  'px-3 py-1 text-sm font-medium rounded-md transition-colors capitalize',
+                  'px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors capitalize',
                   {
                     'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm': viewType === type,
                     'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100': viewType !== type,
@@ -469,10 +493,11 @@ const Calendar: React.FC<CalendarProps> = ({
 
           <button
             onClick={() => onCreateEvent(currentDate)}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0"
+            aria-label="New Event"
           >
             <Plus size={16} />
-            <span>New Event</span>
+            <span className="hidden sm:inline">New Event</span>
           </button>
         </div>
       </div>
@@ -482,21 +507,20 @@ const Calendar: React.FC<CalendarProps> = ({
   const renderWeekView = () => {
     const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 }); // Start on Monday
     const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
-    const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+    const weekDays = weekViewDays;
     const currentHour = new Date().getHours();
     const today = new Date();
 
-    // Get events for the entire week
-    const getEventsForWeek = () => {
-      return events.filter(event => {
-        const eventDate = new Date(event.start);
-        return eventDate >= weekStart && eventDate <= weekEnd;
-      });
-    };
+    // Events for the entire week — computed once, then filtered locally
+    // (previously re-filtered the full events array for every day/hour cell).
+    const weekEvents = events.filter(event => {
+      const eventDate = new Date(event.start);
+      return eventDate >= weekStart && eventDate <= weekEnd;
+    });
 
     // Get events for a specific day and hour
     const getEventsForDayAndHour = (day: Date, hour: number) => {
-      return getEventsForWeek().filter(event => {
+      return weekEvents.filter(event => {
         if (!isSameDay(new Date(event.start), day)) return false;
 
         if (event.allDay) return hour === 0; // Show all-day events at midnight
@@ -509,19 +533,19 @@ const Calendar: React.FC<CalendarProps> = ({
 
     // Get all-day events for the week
     const getAllDayEvents = () => {
-      return getEventsForWeek().filter(event => event.allDay);
+      return weekEvents.filter(event => event.allDay);
     };
 
     // Get all-day events for a specific day
     const getAllDayEventsForDay = (day: Date) => {
-      return getAllDayEvents().filter(event =>
-        isSameDay(new Date(event.start), day)
+      return weekEvents.filter(event =>
+        event.allDay && isSameDay(new Date(event.start), day)
       );
     };
 
     // Get all events for a specific day
     const getEventsForDay = (day: Date) => {
-      return getEventsForWeek().filter(event =>
+      return weekEvents.filter(event =>
         isSameDay(new Date(event.start), day)
       );
     };
@@ -643,9 +667,6 @@ const Calendar: React.FC<CalendarProps> = ({
           <div className="relative h-full flex flex-col">
           {/* Gradient canvas covers the 7 day columns (skips the 12.5% time column) */}
           {(() => {
-            const weekColorGrid: string[][] = Array.from({ length: 24 }, (_, hour) =>
-              weekDays.map(day => getCellColor(day, hour) ?? emptyCellColor)
-            );
             return (
               <>
                 <GradientCanvas
@@ -749,15 +770,10 @@ const Calendar: React.FC<CalendarProps> = ({
 
         {/* Hours timeline — fills remaining height, no scroll */}
         {(() => {
-          const hours24 = Array.from({ length: 24 }, (_, i) => i);
-          const gradientStops = hours24
-            .map((h, i) => `${getCellColor(currentDate, h) ?? emptyCellColor} ${((i / 23) * 100).toFixed(1)}%`)
-            .join(', ');
-          const bgGradient = `linear-gradient(to bottom, ${gradientStops})`;
           return (
             <div
               className="flex-1 min-h-0 flex flex-col relative"
-              style={{ background: bgGradient }}
+              style={{ background: dayViewGradient }}
             >
               {hours.map((hour) => {
                 const hourEvents = getEventsForHour(hour);
@@ -782,8 +798,15 @@ const Calendar: React.FC<CalendarProps> = ({
                       </span>
                     </div>
 
-                    {/* Events column */}
-                    <div className="flex-1 px-2 py-0.5 relative overflow-hidden">
+                    {/* Events column — tap to create an event at this hour */}
+                    <div
+                      className="flex-1 px-2 py-0.5 relative overflow-hidden cursor-pointer"
+                      onClick={() => {
+                        const eventDate = new Date(currentDate);
+                        eventDate.setHours(hour, 0, 0, 0);
+                        onCreateEvent(eventDate);
+                      }}
+                    >
                       {/* Current time indicator */}
                       {isCurrentHour && (
                         <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 h-0.5 bg-blue-500 z-10">
