@@ -19,6 +19,70 @@
     @apply bg-gray-900/80 backdrop-blur-md border border-gray-700/20;
   }
 
+  /* --- Month day cell: legible, non-overlapping layout over the gradient ---
+     Each cell is a container so its children respond to the CELL's width
+     (not the viewport), which is what actually drives collisions. */
+  .dc-cell {
+    container-type: inline-size;
+  }
+
+  /* Day number and weather each sit on a translucent scrim chip. The scrim
+     guarantees >=4.5:1 text contrast anywhere on the warm->cool gradient while
+     keeping the gradient visible around it. */
+  .dc-daynum {
+    @apply inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-md;
+    @apply text-sm font-semibold leading-none;
+    @apply bg-white/70 text-gray-900 backdrop-blur-sm shadow-sm;
+  }
+  .dark .dc-daynum {
+    @apply bg-gray-900/60 text-gray-100;
+  }
+  /* blue-600 (not blue-500) keeps white-on-blue >=4.5:1 for the today number. */
+  .dc-daynum--today {
+    @apply bg-blue-600 text-white rounded-full w-6 h-6;
+  }
+  .dark .dc-daynum--today {
+    @apply bg-blue-600 text-white;
+  }
+  .dc-daynum--muted {
+    @apply bg-white/50 text-gray-500;
+  }
+  .dark .dc-daynum--muted {
+    @apply bg-gray-900/45 text-gray-400;
+  }
+
+  .dc-weather {
+    @apply inline-flex items-center gap-1 h-5 px-1 rounded-md whitespace-nowrap;
+    @apply text-[11px] font-medium leading-none;
+    @apply bg-white/70 text-gray-800 backdrop-blur-sm shadow-sm;
+  }
+  .dark .dc-weather {
+    @apply bg-gray-900/60 text-gray-100;
+  }
+  .dc-wx-precip {
+    @apply text-blue-700;
+  }
+  .dark .dc-wx-precip {
+    @apply text-blue-300;
+  }
+
+  /* Progressive disclosure by cell width. Never overlap — hide whole elements.
+     Drop order as the cell narrows: precip, then icon, then temp, then the
+     entire weather row (the gradient still carries temperature).
+     Thresholds are on the cell's CONTENT box (padding + right border excluded),
+     empirically calibrated against 320/375/414/600/768px viewports. */
+  .dc-weather { display: none; }
+  .dc-wx-icon, .dc-wx-precip { display: none; }
+  @container (min-width: 24px) {
+    .dc-weather { display: inline-flex; }        /* temp only */
+  }
+  @container (min-width: 46px) {
+    .dc-wx-icon { display: inline; }             /* + condition icon */
+  }
+  @container (min-width: 76px) {
+    .dc-wx-precip { display: inline; }           /* + precipitation */
+  }
+
   /* Calendar grid styles */
   .calendar-grid {
     @apply grid grid-cols-7 gap-px bg-gray-200 dark:bg-gray-700;

@@ -328,12 +328,16 @@ const Calendar: React.FC<CalendarProps> = ({
             const isTodayDate = isToday(day);
             const dayWeather = getDayWeather(day);
             const isHovered = hoveredDate && isSameDay(hoveredDate, day);
+            // Screen readers get the weather even when it's visually dropped in narrow cells.
+            const weatherLabel = dayWeather
+              ? `, ${dayWeather.temp} degrees${dayWeather.rainPercent > 0 ? `, ${dayWeather.rainPercent}% chance of precipitation` : ''}`
+              : '';
 
             return (
               <div
                 key={day.toISOString()}
                 className={clsx(
-                  'relative min-h-[100px] p-2 border-r border-b border-black/[0.06] dark:border-white/[0.08] cursor-pointer z-[1]',
+                  'dc-cell relative min-h-[100px] p-2 border-r border-b border-black/[0.06] dark:border-white/[0.08] cursor-pointer z-[1]',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
                   { 'text-gray-400 dark:text-gray-500': !isCurrentMonth }
                 )}
@@ -342,7 +346,7 @@ const Calendar: React.FC<CalendarProps> = ({
                 onMouseLeave={() => setHoveredDate(null)}
                 tabIndex={0}
                 role="gridcell"
-                aria-label={format(day, 'MMMM d, yyyy')}
+                aria-label={`${format(day, 'MMMM d, yyyy')}${weatherLabel}`}
               >
                 {/* Selection / hover highlight */}
                 {isSelected && (
@@ -352,45 +356,45 @@ const Calendar: React.FC<CalendarProps> = ({
                   <div className="absolute inset-0 bg-white/20 dark:bg-white/10 pointer-events-none" style={{ zIndex: 20 }} />
                 )}
 
-                {/* Date number + weather badge / add button */}
-                <div className="flex items-start justify-between mb-1">
+                {/* Top row: day number (left) and, on hover, the add button (right).
+                    Deterministic slots — the number never shares horizontal space
+                    with the weather, so they cannot collide. */}
+                <div className="flex items-start justify-between gap-1 mb-1">
                   <span
-                    className={clsx(
-                      'text-sm font-medium leading-none',
-                      {
-                        'text-white bg-blue-500 rounded-full w-6 h-6 flex items-center justify-center shadow-sm': isTodayDate,
-                        'text-gray-800 dark:text-gray-200': isCurrentMonth && !isTodayDate,
-                        'text-gray-400 dark:text-gray-500': !isCurrentMonth,
-                      }
-                    )}
+                    className={clsx('dc-daynum', {
+                      'dc-daynum--today': isTodayDate,
+                      'dc-daynum--muted': !isCurrentMonth,
+                    })}
                   >
                     {format(day, 'd')}
                   </span>
 
-                  <div className="flex flex-col items-end gap-0.5">
-                    {dayWeather && !isHovered && (
-                      <div className="flex items-center gap-0.5 text-[9px] leading-none text-gray-700/80 dark:text-gray-300/80">
-                        <span>{dayWeather.emoji}</span>
-                        <span className="font-medium">{dayWeather.temp}°</span>
-                        {dayWeather.rainPercent > 0 && (
-                          <span className="text-blue-600/80 dark:text-blue-400/80">💧{dayWeather.rainPercent}%</span>
-                        )}
-                      </div>
-                    )}
-                    {isHovered && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCreateEvent(day);
-                        }}
-                        className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-sm"
-                        aria-label="Add event"
-                      >
-                        <Plus size={12} />
-                      </button>
+                  {isHovered && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCreateEvent(day);
+                      }}
+                      className="w-5 h-5 shrink-0 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-sm"
+                      aria-label="Add event"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Weather row: full cell width, progressive disclosure by cell
+                    width (see .dc-weather container queries). aria-hidden — the
+                    cell's aria-label already announces the weather. */}
+                {dayWeather && !isHovered && (
+                  <div className="dc-weather mb-1" aria-hidden="true">
+                    <span className="dc-wx-icon">{dayWeather.emoji}</span>
+                    <span className="dc-wx-temp">{dayWeather.temp}°</span>
+                    {dayWeather.rainPercent > 0 && (
+                      <span className="dc-wx-precip">💧{dayWeather.rainPercent}%</span>
                     )}
                   </div>
-                </div>
+                )}
 
                 {/* Events */}
                 <div className="space-y-1">

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { MapPin, Search, LocateFixed, Loader2 } from 'lucide-react';
 import { searchLocations, type GeocodingResult } from '../services/geocodingService';
 import { getCurrentLocation, reverseGeocode } from '../services/weatherService';
+import { activeProvider } from '../services/weatherProvider';
 import type { Location } from '../types';
 
 interface LocationPickerProps {
@@ -142,6 +143,19 @@ const LocationPicker: React.FC<LocationPickerProps> = ({ currentLocation, onSele
               ))}
             </ul>
           )}
+
+          {/* Weather-data attribution (required by the provider's licence). */}
+          <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500">
+            Weather data by{' '}
+            <a
+              href={activeProvider.attribution.url}
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              {activeProvider.attribution.name}
+            </a>
+          </div>
         </div>
       )}
     </div>

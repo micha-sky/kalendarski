@@ -2,7 +2,8 @@ import { useReducer, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
-import { fetchWeatherForRange, getMissingDates } from '../services/openMeteoService';
+import { getMissingDates } from '../services/openMeteoService';
+import { activeProvider } from '../services/weatherProvider';
 import { AppContext, type AppContextType } from './useApp';
 
 const STORAGE_KEYS = {
@@ -101,6 +102,7 @@ export type AppAction =
   | { type: 'DELETE_CALENDAR'; payload: string }
   | { type: 'SET_EVENTS'; payload: CalendarEvent[] }
   | { type: 'ADD_EVENT'; payload: CalendarEvent }
+  | { type: 'ADD_EVENTS'; payload: CalendarEvent[] }
   | { type: 'UPDATE_EVENT'; payload: CalendarEvent }
   | { type: 'DELETE_EVENT'; payload: string }
   | { type: 'SET_WEATHER_DATA'; payload: WeatherForecast }
@@ -145,6 +147,13 @@ function appReducer(state: AppState, action: AppAction): AppState {
     
     case 'ADD_EVENT':
       return { ...state, events: [...state.events, action.payload] };
+
+    case 'ADD_EVENTS': {
+      // Dedup by id so re-importing the same file doesn't create duplicates.
+      const existingIds = new Set(state.events.map(e => e.id));
+      const fresh = action.payload.filter(e => !existingIds.has(e.id));
+      return { ...state, events: [...state.events, ...fresh] };
+    }
     
     case 'UPDATE_EVENT':
       return {
@@ -223,11 +232,20 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const addEvent = (eventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'>) => {
     const event: CalendarEvent = {
       ...eventData,
+      source: eventData.source ?? 'local',
       id: generateId(),
       createdAt: new Date(),
       updatedAt: new Date(),
     };
     dispatch({ type: 'ADD_EVENT', payload: event });
+  };
+
+  // Bulk-add pre-formed events (ICS import). Returns how many were newly added.
+  const importEvents = (newEvents: CalendarEvent[]): number => {
+    const existingIds = new Set(state.events.map(e => e.id));
+    const added = newEvents.filter(e => !existingIds.has(e.id)).length;
+    dispatch({ type: 'ADD_EVENTS', payload: newEvents });
+    return added;
   };
 
   const updateEvent = (event: CalendarEvent) => {
@@ -318,7 +336,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     const maxDate = new Date(missing[missing.length - 1]);
 
     try {
-      const fetched = await fetchWeatherForRange(state.location, minDate, maxDate);
+      const fetched = await activeProvider.getForecast(state.location, minDate, maxDate);
       dispatch({ type: 'MERGE_DAY_WEATHER', payload: fetched });
       // Persist merged cache
       const merged = { ...state.dayWeatherCache, ...fetched };
@@ -436,6 +454,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     addEvent,
     updateEvent,
     deleteEvent,
+    importEvents,
     refreshWeatherData,
     fetchWeatherForDates,
     setLocation,
