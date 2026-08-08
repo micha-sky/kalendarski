@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../contexts/useApp';
 import Calendar from './Calendar';
 import EventModal from './EventModal';
 import LocationPicker from './LocationPicker';
 import type { CalendarEvent } from '../types';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, Upload, Download } from 'lucide-react';
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
 } from 'date-fns';
+import { parseICSToEvents, eventsToICS, icsExportFilename } from '../services/icsService';
 
 const MainLayout: React.FC = () => {
   const {
     events,
+    calendars,
     weatherData,
     viewState,
     location,
@@ -21,6 +23,7 @@ const MainLayout: React.FC = () => {
     addEvent,
     updateEvent,
     deleteEvent,
+    importEvents,
     refreshWeatherData,
     fetchWeatherForDates,
     setLocation,
@@ -33,6 +36,65 @@ const MainLayout: React.FC = () => {
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [eventModalDate, setEventModalDate] = useState<Date | null>(null);
   const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-dismiss the import/export status message.
+  useEffect(() => {
+    if (!importMsg) return;
+    const id = setTimeout(() => setImportMsg(null), 4000);
+    return () => clearTimeout(id);
+  }, [importMsg]);
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same file be re-selected later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const now = new Date();
+      const rangeStart = new Date(now); rangeStart.setFullYear(now.getFullYear() - 1);
+      const rangeEnd = new Date(now); rangeEnd.setFullYear(now.getFullYear() + 2);
+      const imported = parseICSToEvents(text, {
+        calendarId: calendars[0]?.id ?? 'default',
+        rangeStart,
+        rangeEnd,
+        color: '#8b5cf6',
+      });
+      if (imported.length === 0) {
+        setImportMsg(`No events found in ${file.name}.`);
+        return;
+      }
+      const added = importEvents(imported);
+      setImportMsg(
+        added > 0
+          ? `Imported ${added} event${added === 1 ? '' : 's'} from ${file.name}.`
+          : `${file.name} is already imported.`,
+      );
+    } catch {
+      setImportMsg(`Could not read ${file.name} — is it a valid .ics file?`);
+    }
+  };
+
+  const handleExport = () => {
+    const local = events.filter(ev => ev.source !== 'ics');
+    if (local.length === 0) {
+      setImportMsg('No local events to export.');
+      return;
+    }
+    const blob = new Blob([eventsToICS(local)], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = icsExportFilename();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setImportMsg(`Exported ${local.length} event${local.length === 1 ? '' : 's'}.`);
+  };
 
   // Fetch Open-Meteo data for the currently visible date range
   useEffect(() => {
@@ -125,6 +187,29 @@ const MainLayout: React.FC = () => {
               <span className="hidden sm:inline text-gray-400 dark:text-gray-500 capitalize">{weatherData.current.condition.description}</span>
             </div>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".ics,text/calendar"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+          <button
+            onClick={handleImportClick}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Import calendar (.ics)"
+            title="Import .ics"
+          >
+            <Upload size={16} />
+          </button>
+          <button
+            onClick={handleExport}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Export calendar (.ics)"
+            title="Export .ics"
+          >
+            <Download size={16} />
+          </button>
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
             className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -134,6 +219,20 @@ const MainLayout: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {/* Import/export status */}
+      {importMsg && (
+        <div className="relative z-10 flex items-center justify-between px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200 flex-shrink-0">
+          <span>{importMsg}</span>
+          <button
+            onClick={() => setImportMsg(null)}
+            className="text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-100 ml-4"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Weather error banner */}
       {showWeatherError && (

@@ -1,3 +1,7 @@
+// Where an event came from. All sources map into the same CalendarEvent shape
+// so the UI never branches on provider. Absent = treat as a local event.
+export type EventSource = 'local' | 'ics';
+
 // Calendar and Event Types
 export interface CalendarEvent {
   id: string;
@@ -11,6 +15,7 @@ export interface CalendarEvent {
   location?: string;
   attendees?: string[];
   recurrence?: RecurrenceRule;
+  source?: EventSource;
   createdAt: Date;
   updatedAt: Date;
 }

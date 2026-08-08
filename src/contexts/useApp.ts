@@ -13,6 +13,8 @@ export interface AppContextType extends AppState {
   addEvent: (event: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateEvent: (event: CalendarEvent) => void;
   deleteEvent: (eventId: string) => void;
+  /** Bulk-add already-formed events (e.g. from an ICS import), deduped by id. */
+  importEvents: (events: CalendarEvent[]) => number;
   // Weather actions
   refreshWeatherData: () => Promise<void>;
   fetchWeatherForDates: (startDate: Date, endDate: Date) => Promise<void>;
