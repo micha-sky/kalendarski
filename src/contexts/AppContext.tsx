@@ -2,7 +2,8 @@ import { useReducer, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
-import { fetchWeatherForRange, getMissingDates } from '../services/openMeteoService';
+import { getMissingDates } from '../services/openMeteoService';
+import { activeProvider } from '../services/weatherProvider';
 import { AppContext, type AppContextType } from './useApp';
 
 const STORAGE_KEYS = {
@@ -318,7 +319,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     const maxDate = new Date(missing[missing.length - 1]);
 
     try {
-      const fetched = await fetchWeatherForRange(state.location, minDate, maxDate);
+      const fetched = await activeProvider.getForecast(state.location, minDate, maxDate);
       dispatch({ type: 'MERGE_DAY_WEATHER', payload: fetched });
       // Persist merged cache
       const merged = { ...state.dayWeatherCache, ...fetched };
