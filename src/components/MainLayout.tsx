@@ -9,6 +9,7 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
 } from 'date-fns';
 import { parseICSToEvents, eventsToICS, icsExportFilename } from '../services/icsService';
+import { InstallButton } from './PWAPrompts';
 
 const MainLayout: React.FC = () => {
   const {
@@ -215,6 +216,7 @@ const MainLayout: React.FC = () => {
           >
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+          <InstallButton />
         </div>
       </header>
 
