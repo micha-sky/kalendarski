@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   calendars: 'kalendarski_calendars',
   dayWeather: 'kalendarski_day_weather',
   theme: 'kalendarski_theme',
+  location: 'kalendarski_location',
 } as const;
 
 export type Theme = 'light' | 'dark';
@@ -438,6 +439,14 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     } catch { /* ignore quota errors */ }
   }, [state.calendars]);
 
+  // Remember the chosen location so reloads don't re-prompt for geolocation.
+  useEffect(() => {
+    if (!state.location) return;
+    try {
+      localStorage.setItem(STORAGE_KEYS.location, JSON.stringify(state.location));
+    } catch { /* ignore quota errors */ }
+  }, [state.location]);
+
   // Initialize app data
   useEffect(() => {
     const initializeApp = async () => {
@@ -498,10 +507,18 @@ export const AppProvider = ({ children }: AppProviderProps) => {
         dispatch({ type: 'SET_EVENTS', payload: sampleEvents });
       }
 
+      // Restore the last chosen location so we don't re-prompt for geolocation
+      // on every load; fall back to geolocation (undefined) if none is saved.
+      let savedLocation: Location | undefined;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEYS.location);
+        if (raw) savedLocation = JSON.parse(raw) as Location;
+      } catch { /* ignore parse errors */ }
+
       // Fetch weather — call getWeatherData directly to avoid stale closure on state.location
       try {
         dispatch({ type: 'SET_LOADING', payload: true });
-        const weatherData = await getWeatherData(undefined);
+        const weatherData = await getWeatherData(savedLocation);
         dispatch({ type: 'SET_WEATHER_DATA', payload: weatherData });
         dispatch({ type: 'SET_LOCATION', payload: weatherData.location });
       } catch (error) {

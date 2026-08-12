@@ -13,6 +13,9 @@ export interface CalendarEvent {
   calendarId: string;
   color?: string;
   location?: string;
+  /** Resolved coordinates for `location`, enabling per-event weather. Optional:
+   *  free-text locations (or ICS imports) may have no coordinates. */
+  locationCoords?: { latitude: number; longitude: number; timezone?: string };
   attendees?: string[];
   recurrence?: RecurrenceRule;
   source?: EventSource;
