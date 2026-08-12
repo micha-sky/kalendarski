@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
 import { fetchSubscriptionIcs, nameFromUrl } from '../services/subscriptionService';
-import { parseICSToEvents } from '../services/icsService';
 import { getMissingDates } from '../services/openMeteoService';
 import { activeProvider } from '../services/weatherProvider';
 import { AppContext, type AppContextType } from './useApp';
@@ -280,6 +279,8 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     const now = new Date();
     const rangeStart = new Date(now); rangeStart.setFullYear(now.getFullYear() - 1);
     const rangeEnd = new Date(now); rangeEnd.setFullYear(now.getFullYear() + 2);
+    // Lazy-load the ical.js-backed parser only when a subscription actually syncs.
+    const { parseICSToEvents } = await import('../services/icsService');
     const events = parseICSToEvents(icsText, {
       calendarId: cal.id,
       rangeStart,

@@ -8,7 +8,6 @@ import { Sun, Moon, Upload, Download, Rss } from 'lucide-react';
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
 } from 'date-fns';
-import { parseICSToEvents, eventsToICS, icsExportFilename } from '../services/icsService';
 import { InstallButton } from './PWAPrompts';
 import SubscriptionManager from './SubscriptionManager';
 
@@ -60,6 +59,8 @@ const MainLayout: React.FC = () => {
       const now = new Date();
       const rangeStart = new Date(now); rangeStart.setFullYear(now.getFullYear() - 1);
       const rangeEnd = new Date(now); rangeEnd.setFullYear(now.getFullYear() + 2);
+      // Lazy-load the (heavy) ical.js-backed parser only when actually importing.
+      const { parseICSToEvents } = await import('../services/icsService');
       const imported = parseICSToEvents(text, {
         calendarId: calendars[0]?.id ?? 'default',
         rangeStart,
@@ -81,12 +82,14 @@ const MainLayout: React.FC = () => {
     }
   };
 
-  const handleExport = () => {
-    const local = events.filter(ev => ev.source !== 'ics');
+  const handleExport = async () => {
+    // Export only user-owned events — never ICS imports or read-only subscriptions.
+    const local = events.filter(ev => ev.source == null || ev.source === 'local');
     if (local.length === 0) {
       setImportMsg('No local events to export.');
       return;
     }
+    const { eventsToICS, icsExportFilename } = await import('../services/icsService');
     const blob = new Blob([eventsToICS(local)], { type: 'text/calendar;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

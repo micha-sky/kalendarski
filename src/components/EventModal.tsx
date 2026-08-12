@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { X, Trash2, Calendar as CalendarIcon, Clock, MapPin, Loader2 } from 'lucide-react';
 import { searchLocations, type GeocodingResult } from '../services/geocodingService';
 import { getEventWeather, hasEventForecast, type EventWeather } from '../services/eventWeatherService';
+import { useDialog } from '../hooks/useDialog';
 
 interface EventModalProps {
   isOpen: boolean;
@@ -44,6 +45,8 @@ const EventModal: React.FC<EventModalProps> = ({
   const [eventWeather, setEventWeather] = useState<EventWeather | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialog(isOpen, onClose, dialogRef);
 
   // const [attendeeInput, setAttendeeInput] = useState('');
 
@@ -188,10 +191,16 @@ const EventModal: React.FC<EventModalProps> = ({
         />
 
         {/* Modal */}
-        <div className="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white dark:bg-gray-800 shadow-xl rounded-2xl">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="event-modal-title"
+          className="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white dark:bg-gray-800 shadow-xl rounded-2xl"
+        >
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+            <h3 id="event-modal-title" className="text-lg font-medium text-gray-900 dark:text-gray-100">
               {event ? 'Edit Event' : 'New Event'}
             </h3>
             <div className="flex items-center space-x-2">
@@ -224,6 +233,7 @@ const EventModal: React.FC<EventModalProps> = ({
               <input
                 type="text"
                 id="title"
+                data-autofocus
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"

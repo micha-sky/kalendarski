@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useApp } from '../contexts/useApp';
 import { RefreshCw, Trash2, X, Rss, Plus } from 'lucide-react';
+import { useDialog } from '../hooks/useDialog';
 
 interface SubscriptionManagerProps {
   open: boolean;
@@ -19,6 +20,8 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ open, onClose
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialog(open, onClose, dialogRef);
 
   const subscriptions = calendars.filter(c => c.type === 'subscribed');
   const eventCount = (calendarId: string) => events.filter(e => e.calendarId === calendarId).length;
@@ -60,11 +63,15 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ open, onClose
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="subscriptions-title"
         className="w-full max-w-md rounded-xl bg-white shadow-xl dark:bg-gray-900"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+          <h2 id="subscriptions-title" className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
             <Rss className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             Calendar subscriptions
           </h2>
@@ -81,6 +88,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ open, onClose
           <input
             type="url"
             required
+            data-autofocus
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://example.com/calendar.ics"
