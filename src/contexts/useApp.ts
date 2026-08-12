@@ -15,6 +15,13 @@ export interface AppContextType extends AppState {
   deleteEvent: (eventId: string) => void;
   /** Bulk-add already-formed events (e.g. from an ICS import), deduped by id. */
   importEvents: (events: CalendarEvent[]) => number;
+  // Subscription (remote .ics) actions
+  /** Subscribe to a remote .ics URL; fetches via the proxy and syncs its events. */
+  addSubscription: (url: string, name?: string) => Promise<void>;
+  /** Re-fetch a subscribed calendar and replace its events. */
+  refreshSubscription: (calendarId: string) => Promise<void>;
+  /** Remove a subscribed calendar and its events. */
+  removeSubscription: (calendarId: string) => void;
   // Weather actions
   refreshWeatherData: () => Promise<void>;
   fetchWeatherForDates: (startDate: Date, endDate: Date) => Promise<void>;

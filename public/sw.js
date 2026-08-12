@@ -85,6 +85,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
+  // Never cache same-origin API calls (e.g. the /api/ics-proxy subscription
+  // proxy) — always hit the network so a refresh returns live data.
+  if (url.origin === self.location.origin && url.pathname.startsWith('/api/')) return;
+
   // Weather / geocoding APIs — cross-origin, stale-while-revalidate.
   if (WEATHER_HOSTS.includes(url.hostname)) {
     event.respondWith(staleWhileRevalidate(request, WEATHER_CACHE));

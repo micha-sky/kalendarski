@@ -1,6 +1,6 @@
 // Where an event came from. All sources map into the same CalendarEvent shape
 // so the UI never branches on provider. Absent = treat as a local event.
-export type EventSource = 'local' | 'ics';
+export type EventSource = 'local' | 'ics' | 'subscription';
 
 // Calendar and Event Types
 export interface CalendarEvent {

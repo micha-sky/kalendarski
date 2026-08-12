@@ -4,12 +4,13 @@ import Calendar from './Calendar';
 import EventModal from './EventModal';
 import LocationPicker from './LocationPicker';
 import type { CalendarEvent } from '../types';
-import { Sun, Moon, Upload, Download } from 'lucide-react';
+import { Sun, Moon, Upload, Download, Rss } from 'lucide-react';
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
 } from 'date-fns';
 import { parseICSToEvents, eventsToICS, icsExportFilename } from '../services/icsService';
 import { InstallButton } from './PWAPrompts';
+import SubscriptionManager from './SubscriptionManager';
 
 const MainLayout: React.FC = () => {
   const {
@@ -38,6 +39,7 @@ const MainLayout: React.FC = () => {
   const [eventModalDate, setEventModalDate] = useState<Date | null>(null);
   const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [subscriptionsOpen, setSubscriptionsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-dismiss the import/export status message.
@@ -210,6 +212,14 @@ const MainLayout: React.FC = () => {
             <Download size={16} />
           </button>
           <button
+            onClick={() => setSubscriptionsOpen(true)}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Calendar subscriptions"
+            title="Subscribe to a calendar"
+          >
+            <Rss size={16} />
+          </button>
+          <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
             className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             aria-label="Toggle theme"
@@ -280,6 +290,8 @@ const MainLayout: React.FC = () => {
         onDelete={selectedEvent ? () => handleEventDelete(selectedEvent.id) : undefined}
         onClose={handleModalClose}
       />
+
+      <SubscriptionManager open={subscriptionsOpen} onClose={() => setSubscriptionsOpen(false)} />
     </div>
   );
 };

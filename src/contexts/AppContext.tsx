@@ -2,6 +2,8 @@ import { useReducer, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
+import { fetchSubscriptionIcs, nameFromUrl } from '../services/subscriptionService';
+import { parseICSToEvents } from '../services/icsService';
 import { getMissingDates } from '../services/openMeteoService';
 import { activeProvider } from '../services/weatherProvider';
 import { AppContext, type AppContextType } from './useApp';
@@ -103,6 +105,7 @@ export type AppAction =
   | { type: 'SET_EVENTS'; payload: CalendarEvent[] }
   | { type: 'ADD_EVENT'; payload: CalendarEvent }
   | { type: 'ADD_EVENTS'; payload: CalendarEvent[] }
+  | { type: 'REPLACE_CALENDAR_EVENTS'; payload: { calendarId: string; events: CalendarEvent[] } }
   | { type: 'UPDATE_EVENT'; payload: CalendarEvent }
   | { type: 'DELETE_EVENT'; payload: string }
   | { type: 'SET_WEATHER_DATA'; payload: WeatherForecast }
@@ -153,6 +156,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
       const existingIds = new Set(state.events.map(e => e.id));
       const fresh = action.payload.filter(e => !existingIds.has(e.id));
       return { ...state, events: [...state.events, ...fresh] };
+    }
+
+    case 'REPLACE_CALENDAR_EVENTS': {
+      // Swap out all events for one calendar (used when re-syncing a subscription).
+      const others = state.events.filter(e => e.calendarId !== action.payload.calendarId);
+      return { ...state, events: [...others, ...action.payload.events] };
     }
     
     case 'UPDATE_EVENT':
@@ -258,6 +267,69 @@ export const AppProvider = ({ children }: AppProviderProps) => {
 
   const deleteEvent = (eventId: string) => {
     dispatch({ type: 'DELETE_EVENT', payload: eventId });
+  };
+
+  // Subscription (remote .ics) actions
+  const SUBSCRIPTION_COLORS = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#0ea5e9', '#84cc16'];
+
+  // Fetch a subscribed calendar's feed and replace its events with the fresh set.
+  const syncSubscription = async (cal: Calendar): Promise<void> => {
+    if (!cal.url) return;
+    const icsText = await fetchSubscriptionIcs(cal.url);
+    const now = new Date();
+    const rangeStart = new Date(now); rangeStart.setFullYear(now.getFullYear() - 1);
+    const rangeEnd = new Date(now); rangeEnd.setFullYear(now.getFullYear() + 2);
+    const events = parseICSToEvents(icsText, {
+      calendarId: cal.id,
+      rangeStart,
+      rangeEnd,
+      color: cal.color,
+      source: 'subscription',
+    });
+    dispatch({ type: 'REPLACE_CALENDAR_EVENTS', payload: { calendarId: cal.id, events } });
+    dispatch({ type: 'UPDATE_CALENDAR', payload: { ...cal, lastSync: new Date() } });
+  };
+
+  // Subscribe to a remote .ics URL. Rolls back the calendar if the first sync fails.
+  const addSubscription = async (url: string, name?: string): Promise<void> => {
+    const trimmedUrl = url.trim();
+    const cal: Calendar = {
+      id: generateId(),
+      name: name?.trim() || nameFromUrl(trimmedUrl),
+      color: SUBSCRIPTION_COLORS[state.calendars.length % SUBSCRIPTION_COLORS.length],
+      isVisible: true,
+      isReadOnly: true,
+      type: 'subscribed',
+      url: trimmedUrl,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    dispatch({ type: 'ADD_CALENDAR', payload: cal });
+    dispatch({ type: 'SET_LOADING', payload: true });
+    try {
+      await syncSubscription(cal);
+    } catch (err) {
+      dispatch({ type: 'DELETE_CALENDAR', payload: cal.id }); // roll back on failure
+      throw err;
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
+  const refreshSubscription = async (calendarId: string): Promise<void> => {
+    const cal = state.calendars.find(c => c.id === calendarId);
+    if (!cal) return;
+    dispatch({ type: 'SET_LOADING', payload: true });
+    try {
+      await syncSubscription(cal);
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
+  const removeSubscription = (calendarId: string): void => {
+    // DELETE_CALENDAR also drops the calendar's events.
+    dispatch({ type: 'DELETE_CALENDAR', payload: calendarId });
   };
 
   // Weather actions
@@ -373,6 +445,10 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       const storedCalendars = loadFromStorage(STORAGE_KEYS.calendars, reviveCalendar);
       if (storedCalendars && storedCalendars.length > 0) {
         dispatch({ type: 'SET_CALENDARS', payload: storedCalendars });
+        // Refresh subscribed calendars in the background; failures keep cached events.
+        for (const cal of storedCalendars.filter(c => c.type === 'subscribed' && c.url)) {
+          syncSubscription(cal).catch(() => { /* offline or feed error — keep what's cached */ });
+        }
       } else {
         const defaultCalendar: Calendar = {
           id: 'default',
@@ -455,6 +531,9 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     updateEvent,
     deleteEvent,
     importEvents,
+    addSubscription,
+    refreshSubscription,
+    removeSubscription,
     refreshWeatherData,
     fetchWeatherForDates,
     setLocation,

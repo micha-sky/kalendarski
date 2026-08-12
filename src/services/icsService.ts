@@ -1,5 +1,5 @@
 import ICAL from 'ical.js';
-import type { CalendarEvent } from '../types';
+import type { CalendarEvent, EventSource } from '../types';
 
 /**
  * iCalendar (.ics) import/export.
@@ -21,6 +21,8 @@ export interface ParseICSOptions {
   maxOccurrencesPerEvent?: number;
   /** Colour to tag imported events with. */
   color?: string;
+  /** Provenance to stamp on emitted events. Defaults to 'ics' (file import). */
+  source?: EventSource;
 }
 
 const DEFAULT_MAX_OCCURRENCES = 750;
@@ -50,7 +52,7 @@ function toEvent(
     calendarId: opts.calendarId,
     color: opts.color,
     location: item.location || undefined,
-    source: 'ics',
+    source: opts.source ?? 'ics',
     createdAt: now,
     updatedAt: now,
   };
