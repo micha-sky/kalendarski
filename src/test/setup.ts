@@ -18,10 +18,3 @@ if (globalThis.navigator) {
 
 // Mock fetch
 globalThis.fetch = vi.fn();
-
-// Mock environment variables
-vi.mock('import.meta', () => ({
-  env: {
-    VITE_OPENWEATHER_API_KEY: 'test-api-key',
-  },
-}));

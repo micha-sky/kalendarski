@@ -178,11 +178,9 @@ const MainLayout: React.FC = () => {
           )}
           {weatherData?.current && (
             <div className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-              <img
-                src={`https://openweathermap.org/img/wn/${weatherData.current.icon}.png`}
-                alt={weatherData.current.condition.description}
-                className="w-6 h-6"
-              />
+              <span className="text-base leading-none" role="img" aria-label={weatherData.current.condition.description}>
+                {weatherData.current.icon}
+              </span>
               <span className="font-medium">{Math.round(weatherData.current.temperature)}°C</span>
               <span className="hidden sm:inline text-gray-400 dark:text-gray-500 capitalize">{weatherData.current.condition.description}</span>
             </div>
