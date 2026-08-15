@@ -17,7 +17,12 @@ export interface CalendarEvent {
    *  free-text locations (or ICS imports) may have no coordinates. */
   locationCoords?: { latitude: number; longitude: number; timezone?: string };
   attendees?: string[];
+  /** Present on the stored master event of a series. Occurrences are derived
+   *  from it on read (see recurrenceService), never persisted. */
   recurrence?: RecurrenceRule;
+  /** Set only on a generated occurrence, pointing back at its master's id.
+   *  Absent on stored events. */
+  seriesId?: string;
   source?: EventSource;
   createdAt: Date;
   updatedAt: Date;
@@ -39,11 +44,18 @@ export interface Calendar {
 
 export interface RecurrenceRule {
   frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  /** Repeat every N units of `frequency`. Must be >= 1. */
   interval: number;
+  /** Last date an occurrence may start on. Mutually exclusive with `count`. */
   endDate?: Date;
+  /** Total number of occurrences the rule generates. Excluded dates still
+   *  consume one, per RFC 5545. Mutually exclusive with `endDate`. */
   count?: number;
+  /** Weekly rules only: days to repeat on, JS convention (0 = Sunday). */
   byWeekDay?: number[];
   byMonthDay?: number[];
+  /** Start instants of occurrences the user deleted individually (EXDATE). */
+  exDates?: Date[];
 }
 
 // Weather Types

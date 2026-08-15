@@ -188,3 +188,84 @@ describe('eventsToICS — export round-trip', () => {
     expect(meeting.location).toBe('Room 1');
   });
 });
+
+describe('eventsToICS — recurring series', () => {
+  function series(recurrence: CalendarEvent['recurrence']): CalendarEvent {
+    return {
+      id: 'evt-series',
+      title: 'Standup',
+      start: new Date(2026, 0, 5, 9, 0), // Mon 5 Jan 2026, local
+      end: new Date(2026, 0, 5, 9, 30),
+      allDay: false,
+      calendarId: 'default',
+      source: 'local',
+      recurrence,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  const window = {
+    calendarId: 'imported',
+    rangeStart: new Date(2026, 0, 1),
+    rangeEnd: new Date(2026, 2, 1),
+  };
+
+  it('writes one VEVENT with an RRULE, not one per occurrence', () => {
+    const doc = eventsToICS([series({ frequency: 'daily', interval: 1, count: 3 })]);
+    expect(doc.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    expect(doc).toContain('RRULE:FREQ=DAILY;COUNT=3');
+  });
+
+  it('round-trips a daily count rule back into the same occurrences', () => {
+    const doc = eventsToICS([series({ frequency: 'daily', interval: 1, count: 3 })]);
+    const parsed = parseICSToEvents(doc, window);
+
+    expect(parsed).toHaveLength(3);
+    expect(parsed.map((e) => e.start.getDate())).toEqual([5, 6, 7]);
+    expect(parsed.every((e) => e.start.getHours() === 9)).toBe(true);
+  });
+
+  it('round-trips a weekly BYDAY rule', () => {
+    const doc = eventsToICS([
+      series({ frequency: 'weekly', interval: 1, byWeekDay: [1, 3, 5], count: 4 }),
+    ]);
+    expect(doc).toContain('BYDAY=MO,WE,FR');
+
+    const parsed = parseICSToEvents(doc, window);
+    expect(parsed.map((e) => e.start.getDate())).toEqual([5, 7, 9, 12]);
+  });
+
+  it('writes INTERVAL only when it is greater than one', () => {
+    const every = eventsToICS([series({ frequency: 'weekly', interval: 1, count: 2 })]);
+    expect(every).not.toContain('INTERVAL');
+
+    const other = eventsToICS([series({ frequency: 'weekly', interval: 2, count: 2 })]);
+    expect(other).toContain('INTERVAL=2');
+  });
+
+  it('writes UNTIL for a date-bounded rule', () => {
+    const doc = eventsToICS([
+      series({ frequency: 'daily', interval: 1, endDate: new Date(2026, 0, 7, 23, 59) }),
+    ]);
+    expect(doc).toContain('UNTIL=');
+
+    const parsed = parseICSToEvents(doc, window);
+    expect(parsed.map((e) => e.start.getDate())).toEqual([5, 6, 7]);
+  });
+
+  it('writes EXDATE so a deleted occurrence stays deleted through a round-trip', () => {
+    const doc = eventsToICS([
+      series({
+        frequency: 'daily',
+        interval: 1,
+        count: 3,
+        exDates: [new Date(2026, 0, 6, 9, 0)],
+      }),
+    ]);
+    expect(doc).toContain('EXDATE');
+
+    const parsed = parseICSToEvents(doc, window);
+    expect(parsed.map((e) => e.start.getDate())).toEqual([5, 7]);
+  });
+});

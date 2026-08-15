@@ -12,7 +12,10 @@ export interface AppContextType extends AppState {
   // Event actions
   addEvent: (event: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateEvent: (event: CalendarEvent) => void;
+  /** Delete an event, or the whole series if given one of its occurrences. */
   deleteEvent: (eventId: string) => void;
+  /** Delete a single occurrence of a series, keeping the rest. */
+  deleteOccurrence: (eventId: string) => void;
   /** Bulk-add already-formed events (e.g. from an ICS import), deduped by id. */
   importEvents: (events: CalendarEvent[]) => number;
   // Subscription (remote .ics) actions

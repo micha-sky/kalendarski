@@ -1,5 +1,5 @@
 import ICAL from 'ical.js';
-import type { CalendarEvent, EventSource } from '../types';
+import type { CalendarEvent, EventSource, RecurrenceRule } from '../types';
 
 /**
  * iCalendar (.ics) import/export.
@@ -137,9 +137,34 @@ function toICALDate(d: Date): ICAL.Time {
   });
 }
 
+// RFC 5545 weekday names, indexed by the JS weekday numbering we store.
+const ICAL_WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+/**
+ * Build an RRULE for a locally created series. Only covers the subset of rules
+ * the app can author (see RecurrenceRule) — imported events are expanded on
+ * read and exported as individual occurrences, so they never reach this path.
+ */
+function toRRule(rule: RecurrenceRule): string {
+  const parts = [`FREQ=${rule.frequency.toUpperCase()}`];
+  if (rule.interval > 1) parts.push(`INTERVAL=${rule.interval}`);
+  if (rule.frequency === 'weekly' && rule.byWeekDay?.length) {
+    parts.push(`BYDAY=${rule.byWeekDay.map((d) => ICAL_WEEKDAYS[d]).join(',')}`);
+  }
+  if (rule.count != null) {
+    parts.push(`COUNT=${rule.count}`);
+  } else if (rule.endDate) {
+    // UNTIL must be UTC when DTSTART is a timestamp.
+    parts.push(`UNTIL=${ICAL.Time.fromJSDate(new Date(rule.endDate), true).toICALString()}`);
+  }
+  return parts.join(';');
+}
+
 /**
  * Serialise events to an .ics document. Timed events are written in UTC (Z) so
- * they are unambiguous; all-day events are written as DATE values.
+ * they are unambiguous; all-day events are written as DATE values. A recurring
+ * event is written once, as a master carrying RRULE/EXDATE, rather than as its
+ * expanded occurrences.
  */
 export function eventsToICS(events: CalendarEvent[], calendarName = 'Kalendarski'): string {
   const cal = new ICAL.Component(['vcalendar', [], []]);
@@ -168,6 +193,16 @@ export function eventsToICS(events: CalendarEvent[], calendarName = 'Kalendarski
     } else {
       event.startDate = ICAL.Time.fromJSDate(e.start, true);
       event.endDate = ICAL.Time.fromJSDate(e.end, true);
+    }
+
+    if (e.recurrence && e.recurrence.interval >= 1) {
+      vevent.updatePropertyWithValue('rrule', ICAL.Recur.fromString(toRRule(e.recurrence)));
+      for (const ex of e.recurrence.exDates ?? []) {
+        vevent.addPropertyWithValue(
+          'exdate',
+          e.allDay ? toICALDate(new Date(ex)) : ICAL.Time.fromJSDate(new Date(ex), true),
+        );
+      }
     }
 
     vevent.updatePropertyWithValue('dtstamp', stamp);

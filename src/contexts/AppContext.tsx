@@ -1,10 +1,11 @@
-import { useReducer, useEffect } from 'react';
+import { useReducer, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
 import { fetchSubscriptionIcs, nameFromUrl } from '../services/subscriptionService';
 import { getMissingDates } from '../services/openMeteoService';
 import { activeProvider } from '../services/weatherProvider';
+import { seriesIdOf, occurrenceStartOf } from '../services/recurrenceService';
 import { AppContext, type AppContextType } from './useApp';
 
 const STORAGE_KEYS = {
@@ -32,6 +33,17 @@ function reviveEvent(raw: Record<string, unknown>): CalendarEvent {
   const obj = { ...raw } as Record<string, unknown>;
   for (const field of DATE_FIELDS_EVENT) {
     if (typeof obj[field] === 'string') obj[field] = new Date(obj[field] as string);
+  }
+  // Recurrence carries nested Dates that JSON has flattened to strings.
+  if (obj.recurrence && typeof obj.recurrence === 'object') {
+    const rule = { ...(obj.recurrence as Record<string, unknown>) };
+    if (typeof rule.endDate === 'string') rule.endDate = new Date(rule.endDate);
+    if (Array.isArray(rule.exDates)) {
+      rule.exDates = (rule.exDates as unknown[]).map(d =>
+        typeof d === 'string' ? new Date(d) : d,
+      );
+    }
+    obj.recurrence = rule;
   }
   return obj as unknown as CalendarEvent;
 }
@@ -208,6 +220,9 @@ interface AppProviderProps {
 
 export const AppProvider = ({ children }: AppProviderProps) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  /** False until localStorage has been read, so the persist effects below
+   *  cannot clobber stored data with the empty initial state on mount. */
+  const hydratedRef = useRef(false);
 
   // Generate unique ID
   const generateId = () => {
@@ -257,16 +272,75 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     return added;
   };
 
+  /**
+   * Save an event. Editing a generated occurrence edits its whole series: the
+   * master is shifted by however far the user moved this occurrence, so opening
+   * next Tuesday's standup and changing 09:00 to 10:00 moves every standup.
+   * Per-occurrence edits are deliberately not supported yet — only per-occurrence
+   * deletion is (see deleteOccurrence).
+   */
   const updateEvent = (event: CalendarEvent) => {
-    const updatedEvent = {
-      ...event,
-      updatedAt: new Date(),
-    };
-    dispatch({ type: 'UPDATE_EVENT', payload: updatedEvent });
+    const seriesId = seriesIdOf(event.id);
+    const originalStart = occurrenceStartOf(event.id);
+
+    if (originalStart !== null) {
+      const master = state.events.find(e => e.id === seriesId);
+      if (master) {
+        // How far the user dragged this occurrence from where it was generated.
+        const deltaMs = event.start.getTime() - originalStart;
+        const durationMs = event.end.getTime() - event.start.getTime();
+        const newStart = new Date(master.start.getTime() + deltaMs);
+
+        dispatch({
+          type: 'UPDATE_EVENT',
+          payload: {
+            ...event,
+            // seriesId only ever belongs on a generated occurrence.
+            seriesId: undefined,
+            id: master.id,
+            start: newStart,
+            end: new Date(newStart.getTime() + durationMs),
+            createdAt: master.createdAt,
+            updatedAt: new Date(),
+          },
+        });
+        return;
+      }
+      // Master vanished (e.g. deleted in another tab) — fall through and store
+      // this occurrence as a standalone event rather than dropping the edit.
+    }
+
+    dispatch({ type: 'UPDATE_EVENT', payload: { ...event, updatedAt: new Date() } });
   };
 
+  /** Delete an event, or the entire series if given one of its occurrences. */
   const deleteEvent = (eventId: string) => {
-    dispatch({ type: 'DELETE_EVENT', payload: eventId });
+    dispatch({ type: 'DELETE_EVENT', payload: seriesIdOf(eventId) });
+  };
+
+  /**
+   * Delete a single occurrence of a series by recording an exclusion on the
+   * master, leaving the rest of the series intact.
+   */
+  const deleteOccurrence = (eventId: string) => {
+    const originalStart = occurrenceStartOf(eventId);
+    if (originalStart === null) {
+      dispatch({ type: 'DELETE_EVENT', payload: eventId });
+      return;
+    }
+
+    const master = state.events.find(e => e.id === seriesIdOf(eventId));
+    if (!master?.recurrence) return;
+
+    const exDates = [...(master.recurrence.exDates ?? []), new Date(originalStart)];
+    dispatch({
+      type: 'UPDATE_EVENT',
+      payload: {
+        ...master,
+        recurrence: { ...master.recurrence, exDates },
+        updatedAt: new Date(),
+      },
+    });
   };
 
   // Subscription (remote .ics) actions
@@ -427,14 +501,22 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     document.documentElement.classList.toggle('dark', state.theme === 'dark');
   }, [state.theme]);
 
-  // Persist events and calendars to localStorage on every change
+  // Persist events and calendars to localStorage on every change.
+  //
+  // Gated on hydration. These effects are declared before the initialising
+  // effect below, so on mount they would otherwise run first and write the
+  // still-empty initial state over what is in storage — the load would then
+  // read nothing and reseed the samples, destroying every saved event and
+  // subscribed calendar on each reload.
   useEffect(() => {
+    if (!hydratedRef.current) return;
     try {
       localStorage.setItem(STORAGE_KEYS.events, JSON.stringify(state.events));
     } catch { /* ignore quota errors */ }
   }, [state.events]);
 
   useEffect(() => {
+    if (!hydratedRef.current) return;
     try {
       localStorage.setItem(STORAGE_KEYS.calendars, JSON.stringify(state.calendars));
     } catch { /* ignore quota errors */ }
@@ -508,6 +590,9 @@ export const AppProvider = ({ children }: AppProviderProps) => {
         dispatch({ type: 'SET_EVENTS', payload: sampleEvents });
       }
 
+      // Storage has now been read, so it is safe to start writing back to it.
+      hydratedRef.current = true;
+
       // Restore the last chosen location so we don't re-prompt for geolocation
       // on every load; fall back to geolocation (undefined) if none is saved.
       let savedLocation: Location | undefined;
@@ -548,6 +633,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     addEvent,
     updateEvent,
     deleteEvent,
+    deleteOccurrence,
     importEvents,
     addSubscription,
     refreshSubscription,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useApp } from '../contexts/useApp';
 import Calendar from './Calendar';
 import EventModal from './EventModal';
@@ -6,8 +6,9 @@ import LocationPicker from './LocationPicker';
 import type { CalendarEvent } from '../types';
 import { Sun, Moon, Upload, Download, Rss } from 'lucide-react';
 import {
-  startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
+  startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths,
 } from 'date-fns';
+import { expandEvents } from '../services/recurrenceService';
 import { InstallButton } from './PWAPrompts';
 import SubscriptionManager from './SubscriptionManager';
 
@@ -24,6 +25,7 @@ const MainLayout: React.FC = () => {
     addEvent,
     updateEvent,
     deleteEvent,
+    deleteOccurrence,
     importEvents,
     refreshWeatherData,
     fetchWeatherForDates,
@@ -47,6 +49,20 @@ const MainLayout: React.FC = () => {
     const id = setTimeout(() => setImportMsg(null), 4000);
     return () => clearTimeout(id);
   }, [importMsg]);
+
+  /**
+   * What the views render: stored events with any recurring series expanded into
+   * concrete occurrences. Padded two months either side of the current date so
+   * navigating a month never lands on an unexpanded grid, and so the agenda
+   * view's 60-day horizon is always covered.
+   *
+   * Note this is intentionally NOT what import/export uses — those act on the
+   * stored masters, so a series exports as one VEVENT with an RRULE.
+   */
+  const visibleEvents = useMemo(() => expandEvents(events, {
+    rangeStart: startOfWeek(startOfMonth(subMonths(viewState.currentDate, 2))),
+    rangeEnd: endOfWeek(endOfMonth(addMonths(viewState.currentDate, 2))),
+  }), [events, viewState.currentDate]);
 
   const handleImportClick = () => fileInputRef.current?.click();
 
@@ -155,8 +171,9 @@ const MainLayout: React.FC = () => {
     setEventModalDate(null);
   };
 
-  const handleEventDelete = (eventId: string) => {
-    deleteEvent(eventId);
+  const handleEventDelete = (eventId: string, scope: 'occurrence' | 'series' = 'series') => {
+    if (scope === 'occurrence') deleteOccurrence(eventId);
+    else deleteEvent(eventId);
     setIsEventModalOpen(false);
     setSelectedEvent(null);
   };
@@ -272,7 +289,7 @@ const MainLayout: React.FC = () => {
       {/* Calendar — fills remaining screen */}
       <main className="relative z-10 flex-1 overflow-hidden">
         <Calendar
-          events={events}
+          events={visibleEvents}
           viewState={viewState}
           onViewStateChange={setViewState}
           onEventClick={handleEventClick}
@@ -290,7 +307,7 @@ const MainLayout: React.FC = () => {
         event={selectedEvent}
         initialDate={eventModalDate}
         onSave={handleEventSave}
-        onDelete={selectedEvent ? () => handleEventDelete(selectedEvent.id) : undefined}
+        onDelete={selectedEvent ? (scope) => handleEventDelete(selectedEvent.id, scope) : undefined}
         onClose={handleModalClose}
       />
 
