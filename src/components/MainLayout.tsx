@@ -189,7 +189,10 @@ const MainLayout: React.FC = () => {
   return (
     <div className="h-dvh bg-white dark:bg-gray-900 relative overflow-hidden flex flex-col">
       {/* Slim top bar */}
-      <header className="relative z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
+      {/* Translucent so the calendar's ambient gradient (rendered inside <main>
+          at a lower z-index) carries continuously up behind the top bar rather
+          than stopping at a hard edge. */}
+      <header className="relative z-20 bg-white/75 dark:bg-gray-900/75 backdrop-blur-md border-b border-gray-200/70 dark:border-gray-800/70 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex-shrink-0">Kalendarski</h1>
           <LocationPicker currentLocation={weatherData?.location ?? location} onSelect={setLocation} />
@@ -252,7 +255,7 @@ const MainLayout: React.FC = () => {
 
       {/* Import/export status */}
       {importMsg && (
-        <div className="relative z-10 flex items-center justify-between px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200 flex-shrink-0">
+        <div className="relative z-20 flex items-center justify-between px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200 flex-shrink-0">
           <span>{importMsg}</span>
           <button
             onClick={() => setImportMsg(null)}
@@ -266,7 +269,7 @@ const MainLayout: React.FC = () => {
 
       {/* Weather error banner */}
       {showWeatherError && (
-        <div className="relative z-10 flex items-center justify-between px-4 py-2 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex-shrink-0">
+        <div className="relative z-20 flex items-center justify-between px-4 py-2 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex-shrink-0">
           <span>{error!.message}</span>
           <div className="flex items-center gap-3 ml-4">
             <button

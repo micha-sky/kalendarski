@@ -77,22 +77,44 @@
   .dark .dc-wx-precip {
     @apply text-blue-300;
   }
+  /* The low sits beside the high. Dimmed so the pair reads as one figure with a
+     dominant number, not two competing ones. */
+  .dc-wx-lo {
+    @apply opacity-70;
+  }
+  /* Precipitation hours get their own chip on a second line — the span is the
+     widest thing in the cell and must not squeeze the temperatures.
+     Styled standalone rather than by also carrying .dc-weather: the two would
+     fight over `display` in the container queries below, and .dc-weather's
+     later rule would win and force the chip visible in narrow cells. */
+  .dc-wx-rain {
+    @apply items-center gap-1 h-5 px-1 rounded-md whitespace-nowrap;
+    @apply text-[11px] font-medium leading-none;
+    @apply bg-white/70 text-blue-800 backdrop-blur-sm shadow-sm;
+  }
+  .dark .dc-wx-rain {
+    @apply bg-gray-900/60 text-blue-200;
+  }
 
   /* Progressive disclosure by cell width. Never overlap — hide whole elements.
-     Drop order as the cell narrows: precip, then icon, then temp, then the
-     entire weather row (the gradient still carries temperature).
+     Drop order as the cell narrows: rain hours, then the low, then the icon,
+     then the high, then the entire weather row (the gradient still carries
+     temperature).
      Thresholds are on the cell's CONTENT box (padding + right border excluded),
      empirically calibrated against 320/375/414/600/768px viewports. */
   .dc-weather { display: none; }
-  .dc-wx-icon, .dc-wx-precip { display: none; }
+  .dc-wx-icon, .dc-wx-lo, .dc-wx-rain { display: none; }
   @container (min-width: 24px) {
-    .dc-weather { display: inline-flex; }        /* temp only */
+    .dc-weather { display: inline-flex; }        /* high only */
   }
   @container (min-width: 46px) {
     .dc-wx-icon { display: inline; }             /* + condition icon */
   }
   @container (min-width: 76px) {
-    .dc-wx-precip { display: inline; }           /* + precipitation */
+    .dc-wx-lo { display: inline; }               /* + the day's low */
+  }
+  @container (min-width: 96px) {
+    .dc-wx-rain { display: inline-flex; }        /* + the hours it rains */
   }
 
   /* Calendar grid styles */

@@ -85,13 +85,31 @@ export interface AppState {
   theme: Theme;
 }
 
+/** Bumped whenever DayCacheEntry gains a field the UI depends on. Historical
+ *  entries are never refetched, so without a version they would keep serving a
+ *  shape that predates the new field forever. A bump just drops the cache. */
+const DAY_WEATHER_SCHEMA = 2;
+
 function loadDayWeatherCache(): Record<string, DayCacheEntry> {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.dayWeather);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // v1 stored the entry map at the top level and had no version marker.
+    if (parsed?.v !== DAY_WEATHER_SCHEMA) return {};
+    return parsed.entries as Record<string, DayCacheEntry>;
   } catch {
     return {};
   }
+}
+
+function persistDayWeatherCache(entries: Record<string, DayCacheEntry>): void {
+  try {
+    localStorage.setItem(
+      STORAGE_KEYS.dayWeather,
+      JSON.stringify({ v: DAY_WEATHER_SCHEMA, entries }),
+    );
+  } catch { /* ignore quota errors */ }
 }
 
 const initialState: AppState = {
@@ -487,10 +505,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       const fetched = await activeProvider.getForecast(state.location, minDate, maxDate);
       dispatch({ type: 'MERGE_DAY_WEATHER', payload: fetched });
       // Persist merged cache
-      const merged = { ...state.dayWeatherCache, ...fetched };
-      try {
-        localStorage.setItem(STORAGE_KEYS.dayWeather, JSON.stringify(merged));
-      } catch { /* ignore quota errors */ }
+      persistDayWeatherCache({ ...state.dayWeatherCache, ...fetched });
     } catch {
       // Silently ignore — weather data is decorative, not critical
     }

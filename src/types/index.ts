@@ -141,6 +141,13 @@ export interface DayCacheEntry {
   hourlyTemps: (number | null)[];              // 24 values, index = hour
   cloudCover: (number | null)[];               // 24 values
   precipitationProbability?: (number | null)[]; // 24 values, 0-100; forecast only
+  /** 24 values, mm falling in that hour. Available on both forecast and archive.
+   *  This is what "it rains at 15:00" is decided on — a probability never
+   *  commits to an hour, an amount does. */
+  precipitationMm?: (number | null)[];
+  /** 24 values, WMO weather code. Separates rain from snow/sleet so the hour
+   *  marker can say which. */
+  weatherCode?: (number | null)[];
   sunriseHour: number;
   sunsetHour: number;
   fetchedAt: number;               // Date.now()
