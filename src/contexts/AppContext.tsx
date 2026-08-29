@@ -1,8 +1,11 @@
-import { useReducer, useEffect } from 'react';
+import { useReducer, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { Calendar, CalendarEvent, WeatherForecast, Location, CalendarViewState, AppError, DayCacheEntry } from '../types';
 import { getWeatherData } from '../services/weatherService';
-import { fetchWeatherForRange, getMissingDates } from '../services/openMeteoService';
+import { fetchSubscriptionIcs, nameFromUrl } from '../services/subscriptionService';
+import { getMissingDates } from '../services/openMeteoService';
+import { activeProvider } from '../services/weatherProvider';
+import { seriesIdOf, occurrenceStartOf } from '../services/recurrenceService';
 import { AppContext, type AppContextType } from './useApp';
 
 const STORAGE_KEYS = {
@@ -10,6 +13,7 @@ const STORAGE_KEYS = {
   calendars: 'kalendarski_calendars',
   dayWeather: 'kalendarski_day_weather',
   theme: 'kalendarski_theme',
+  location: 'kalendarski_location',
 } as const;
 
 export type Theme = 'light' | 'dark';
@@ -29,6 +33,17 @@ function reviveEvent(raw: Record<string, unknown>): CalendarEvent {
   const obj = { ...raw } as Record<string, unknown>;
   for (const field of DATE_FIELDS_EVENT) {
     if (typeof obj[field] === 'string') obj[field] = new Date(obj[field] as string);
+  }
+  // Recurrence carries nested Dates that JSON has flattened to strings.
+  if (obj.recurrence && typeof obj.recurrence === 'object') {
+    const rule = { ...(obj.recurrence as Record<string, unknown>) };
+    if (typeof rule.endDate === 'string') rule.endDate = new Date(rule.endDate);
+    if (Array.isArray(rule.exDates)) {
+      rule.exDates = (rule.exDates as unknown[]).map(d =>
+        typeof d === 'string' ? new Date(d) : d,
+      );
+    }
+    obj.recurrence = rule;
   }
   return obj as unknown as CalendarEvent;
 }
@@ -70,13 +85,31 @@ export interface AppState {
   theme: Theme;
 }
 
+/** Bumped whenever DayCacheEntry gains a field the UI depends on. Historical
+ *  entries are never refetched, so without a version they would keep serving a
+ *  shape that predates the new field forever. A bump just drops the cache. */
+const DAY_WEATHER_SCHEMA = 2;
+
 function loadDayWeatherCache(): Record<string, DayCacheEntry> {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.dayWeather);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // v1 stored the entry map at the top level and had no version marker.
+    if (parsed?.v !== DAY_WEATHER_SCHEMA) return {};
+    return parsed.entries as Record<string, DayCacheEntry>;
   } catch {
     return {};
   }
+}
+
+function persistDayWeatherCache(entries: Record<string, DayCacheEntry>): void {
+  try {
+    localStorage.setItem(
+      STORAGE_KEYS.dayWeather,
+      JSON.stringify({ v: DAY_WEATHER_SCHEMA, entries }),
+    );
+  } catch { /* ignore quota errors */ }
 }
 
 const initialState: AppState = {
@@ -101,6 +134,8 @@ export type AppAction =
   | { type: 'DELETE_CALENDAR'; payload: string }
   | { type: 'SET_EVENTS'; payload: CalendarEvent[] }
   | { type: 'ADD_EVENT'; payload: CalendarEvent }
+  | { type: 'ADD_EVENTS'; payload: CalendarEvent[] }
+  | { type: 'REPLACE_CALENDAR_EVENTS'; payload: { calendarId: string; events: CalendarEvent[] } }
   | { type: 'UPDATE_EVENT'; payload: CalendarEvent }
   | { type: 'DELETE_EVENT'; payload: string }
   | { type: 'SET_WEATHER_DATA'; payload: WeatherForecast }
@@ -145,6 +180,19 @@ function appReducer(state: AppState, action: AppAction): AppState {
     
     case 'ADD_EVENT':
       return { ...state, events: [...state.events, action.payload] };
+
+    case 'ADD_EVENTS': {
+      // Dedup by id so re-importing the same file doesn't create duplicates.
+      const existingIds = new Set(state.events.map(e => e.id));
+      const fresh = action.payload.filter(e => !existingIds.has(e.id));
+      return { ...state, events: [...state.events, ...fresh] };
+    }
+
+    case 'REPLACE_CALENDAR_EVENTS': {
+      // Swap out all events for one calendar (used when re-syncing a subscription).
+      const others = state.events.filter(e => e.calendarId !== action.payload.calendarId);
+      return { ...state, events: [...others, ...action.payload.events] };
+    }
     
     case 'UPDATE_EVENT':
       return {
@@ -190,6 +238,9 @@ interface AppProviderProps {
 
 export const AppProvider = ({ children }: AppProviderProps) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  /** False until localStorage has been read, so the persist effects below
+   *  cannot clobber stored data with the empty initial state on mount. */
+  const hydratedRef = useRef(false);
 
   // Generate unique ID
   const generateId = () => {
@@ -223,6 +274,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const addEvent = (eventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'>) => {
     const event: CalendarEvent = {
       ...eventData,
+      source: eventData.source ?? 'local',
       id: generateId(),
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -230,16 +282,148 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     dispatch({ type: 'ADD_EVENT', payload: event });
   };
 
-  const updateEvent = (event: CalendarEvent) => {
-    const updatedEvent = {
-      ...event,
-      updatedAt: new Date(),
-    };
-    dispatch({ type: 'UPDATE_EVENT', payload: updatedEvent });
+  // Bulk-add pre-formed events (ICS import). Returns how many were newly added.
+  const importEvents = (newEvents: CalendarEvent[]): number => {
+    const existingIds = new Set(state.events.map(e => e.id));
+    const added = newEvents.filter(e => !existingIds.has(e.id)).length;
+    dispatch({ type: 'ADD_EVENTS', payload: newEvents });
+    return added;
   };
 
+  /**
+   * Save an event. Editing a generated occurrence edits its whole series: the
+   * master is shifted by however far the user moved this occurrence, so opening
+   * next Tuesday's standup and changing 09:00 to 10:00 moves every standup.
+   * Per-occurrence edits are deliberately not supported yet — only per-occurrence
+   * deletion is (see deleteOccurrence).
+   */
+  const updateEvent = (event: CalendarEvent) => {
+    const seriesId = seriesIdOf(event.id);
+    const originalStart = occurrenceStartOf(event.id);
+
+    if (originalStart !== null) {
+      const master = state.events.find(e => e.id === seriesId);
+      if (master) {
+        // How far the user dragged this occurrence from where it was generated.
+        const deltaMs = event.start.getTime() - originalStart;
+        const durationMs = event.end.getTime() - event.start.getTime();
+        const newStart = new Date(master.start.getTime() + deltaMs);
+
+        dispatch({
+          type: 'UPDATE_EVENT',
+          payload: {
+            ...event,
+            // seriesId only ever belongs on a generated occurrence.
+            seriesId: undefined,
+            id: master.id,
+            start: newStart,
+            end: new Date(newStart.getTime() + durationMs),
+            createdAt: master.createdAt,
+            updatedAt: new Date(),
+          },
+        });
+        return;
+      }
+      // Master vanished (e.g. deleted in another tab) — fall through and store
+      // this occurrence as a standalone event rather than dropping the edit.
+    }
+
+    dispatch({ type: 'UPDATE_EVENT', payload: { ...event, updatedAt: new Date() } });
+  };
+
+  /** Delete an event, or the entire series if given one of its occurrences. */
   const deleteEvent = (eventId: string) => {
-    dispatch({ type: 'DELETE_EVENT', payload: eventId });
+    dispatch({ type: 'DELETE_EVENT', payload: seriesIdOf(eventId) });
+  };
+
+  /**
+   * Delete a single occurrence of a series by recording an exclusion on the
+   * master, leaving the rest of the series intact.
+   */
+  const deleteOccurrence = (eventId: string) => {
+    const originalStart = occurrenceStartOf(eventId);
+    if (originalStart === null) {
+      dispatch({ type: 'DELETE_EVENT', payload: eventId });
+      return;
+    }
+
+    const master = state.events.find(e => e.id === seriesIdOf(eventId));
+    if (!master?.recurrence) return;
+
+    const exDates = [...(master.recurrence.exDates ?? []), new Date(originalStart)];
+    dispatch({
+      type: 'UPDATE_EVENT',
+      payload: {
+        ...master,
+        recurrence: { ...master.recurrence, exDates },
+        updatedAt: new Date(),
+      },
+    });
+  };
+
+  // Subscription (remote .ics) actions
+  const SUBSCRIPTION_COLORS = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#0ea5e9', '#84cc16'];
+
+  // Fetch a subscribed calendar's feed and replace its events with the fresh set.
+  const syncSubscription = async (cal: Calendar): Promise<void> => {
+    if (!cal.url) return;
+    const icsText = await fetchSubscriptionIcs(cal.url);
+    const now = new Date();
+    const rangeStart = new Date(now); rangeStart.setFullYear(now.getFullYear() - 1);
+    const rangeEnd = new Date(now); rangeEnd.setFullYear(now.getFullYear() + 2);
+    // Lazy-load the ical.js-backed parser only when a subscription actually syncs.
+    const { parseICSToEvents } = await import('../services/icsService');
+    const events = parseICSToEvents(icsText, {
+      calendarId: cal.id,
+      rangeStart,
+      rangeEnd,
+      color: cal.color,
+      source: 'subscription',
+    });
+    dispatch({ type: 'REPLACE_CALENDAR_EVENTS', payload: { calendarId: cal.id, events } });
+    dispatch({ type: 'UPDATE_CALENDAR', payload: { ...cal, lastSync: new Date() } });
+  };
+
+  // Subscribe to a remote .ics URL. Rolls back the calendar if the first sync fails.
+  const addSubscription = async (url: string, name?: string): Promise<void> => {
+    const trimmedUrl = url.trim();
+    const cal: Calendar = {
+      id: generateId(),
+      name: name?.trim() || nameFromUrl(trimmedUrl),
+      color: SUBSCRIPTION_COLORS[state.calendars.length % SUBSCRIPTION_COLORS.length],
+      isVisible: true,
+      isReadOnly: true,
+      type: 'subscribed',
+      url: trimmedUrl,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    dispatch({ type: 'ADD_CALENDAR', payload: cal });
+    dispatch({ type: 'SET_LOADING', payload: true });
+    try {
+      await syncSubscription(cal);
+    } catch (err) {
+      dispatch({ type: 'DELETE_CALENDAR', payload: cal.id }); // roll back on failure
+      throw err;
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
+  const refreshSubscription = async (calendarId: string): Promise<void> => {
+    const cal = state.calendars.find(c => c.id === calendarId);
+    if (!cal) return;
+    dispatch({ type: 'SET_LOADING', payload: true });
+    try {
+      await syncSubscription(cal);
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
+  const removeSubscription = (calendarId: string): void => {
+    // DELETE_CALENDAR also drops the calendar's events.
+    dispatch({ type: 'DELETE_CALENDAR', payload: calendarId });
   };
 
   // Weather actions
@@ -318,13 +502,10 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     const maxDate = new Date(missing[missing.length - 1]);
 
     try {
-      const fetched = await fetchWeatherForRange(state.location, minDate, maxDate);
+      const fetched = await activeProvider.getForecast(state.location, minDate, maxDate);
       dispatch({ type: 'MERGE_DAY_WEATHER', payload: fetched });
       // Persist merged cache
-      const merged = { ...state.dayWeatherCache, ...fetched };
-      try {
-        localStorage.setItem(STORAGE_KEYS.dayWeather, JSON.stringify(merged));
-      } catch { /* ignore quota errors */ }
+      persistDayWeatherCache({ ...state.dayWeatherCache, ...fetched });
     } catch {
       // Silently ignore — weather data is decorative, not critical
     }
@@ -335,18 +516,34 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     document.documentElement.classList.toggle('dark', state.theme === 'dark');
   }, [state.theme]);
 
-  // Persist events and calendars to localStorage on every change
+  // Persist events and calendars to localStorage on every change.
+  //
+  // Gated on hydration. These effects are declared before the initialising
+  // effect below, so on mount they would otherwise run first and write the
+  // still-empty initial state over what is in storage — the load would then
+  // read nothing and reseed the samples, destroying every saved event and
+  // subscribed calendar on each reload.
   useEffect(() => {
+    if (!hydratedRef.current) return;
     try {
       localStorage.setItem(STORAGE_KEYS.events, JSON.stringify(state.events));
     } catch { /* ignore quota errors */ }
   }, [state.events]);
 
   useEffect(() => {
+    if (!hydratedRef.current) return;
     try {
       localStorage.setItem(STORAGE_KEYS.calendars, JSON.stringify(state.calendars));
     } catch { /* ignore quota errors */ }
   }, [state.calendars]);
+
+  // Remember the chosen location so reloads don't re-prompt for geolocation.
+  useEffect(() => {
+    if (!state.location) return;
+    try {
+      localStorage.setItem(STORAGE_KEYS.location, JSON.stringify(state.location));
+    } catch { /* ignore quota errors */ }
+  }, [state.location]);
 
   // Initialize app data
   useEffect(() => {
@@ -355,6 +552,10 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       const storedCalendars = loadFromStorage(STORAGE_KEYS.calendars, reviveCalendar);
       if (storedCalendars && storedCalendars.length > 0) {
         dispatch({ type: 'SET_CALENDARS', payload: storedCalendars });
+        // Refresh subscribed calendars in the background; failures keep cached events.
+        for (const cal of storedCalendars.filter(c => c.type === 'subscribed' && c.url)) {
+          syncSubscription(cal).catch(() => { /* offline or feed error — keep what's cached */ });
+        }
       } else {
         const defaultCalendar: Calendar = {
           id: 'default',
@@ -404,10 +605,21 @@ export const AppProvider = ({ children }: AppProviderProps) => {
         dispatch({ type: 'SET_EVENTS', payload: sampleEvents });
       }
 
+      // Storage has now been read, so it is safe to start writing back to it.
+      hydratedRef.current = true;
+
+      // Restore the last chosen location so we don't re-prompt for geolocation
+      // on every load; fall back to geolocation (undefined) if none is saved.
+      let savedLocation: Location | undefined;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEYS.location);
+        if (raw) savedLocation = JSON.parse(raw) as Location;
+      } catch { /* ignore parse errors */ }
+
       // Fetch weather — call getWeatherData directly to avoid stale closure on state.location
       try {
         dispatch({ type: 'SET_LOADING', payload: true });
-        const weatherData = await getWeatherData(undefined);
+        const weatherData = await getWeatherData(savedLocation);
         dispatch({ type: 'SET_WEATHER_DATA', payload: weatherData });
         dispatch({ type: 'SET_LOCATION', payload: weatherData.location });
       } catch (error) {
@@ -436,6 +648,11 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     addEvent,
     updateEvent,
     deleteEvent,
+    deleteOccurrence,
+    importEvents,
+    addSubscription,
+    refreshSubscription,
+    removeSubscription,
     refreshWeatherData,
     fetchWeatherForDates,
     setLocation,

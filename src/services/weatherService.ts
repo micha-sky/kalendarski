@@ -1,173 +1,82 @@
-import type {WeatherForecast, WeatherData, DailyWeatherData, Location, OpenWeatherMapCurrentResponse, OpenWeatherMapForecastResponse} from '../types';
+import type {WeatherForecast, WeatherData, Location} from '../types';
+import {describeWeatherCode} from './weatherCodes';
 
-// You'll need to get your API key from https://openweathermap.org/api
-const OPENWEATHER_API_KEY = import.meta.env.VITE_OPENWEATHER_API_KEY || 'your-api-key-here';
-const OPENWEATHER_CURRENT_URL = 'https://api.openweathermap.org/data/2.5/weather';
-const OPENWEATHER_FORECAST_URL = 'https://api.openweathermap.org/data/2.5/forecast';
+const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
+const REVERSE_GEOCODE_URL = 'https://api.bigdatacloud.net/data/reverse-geocode-client';
 
-/**
- * Transforms OpenWeatherMap free tier API responses to our internal format
- */
-function transformWeatherData(
-  currentResponse: OpenWeatherMapCurrentResponse,
-  forecastResponse: OpenWeatherMapForecastResponse,
-  location: Location
-): WeatherForecast {
-  // Transform current weather
-  const current: WeatherData = {
-    timestamp: currentResponse.dt,
-    temperature: currentResponse.main.temp,
-    feelsLike: currentResponse.main.feels_like,
-    humidity: currentResponse.main.humidity,
-    pressure: currentResponse.main.pressure,
-    windSpeed: currentResponse.wind.speed,
-    windDirection: currentResponse.wind.deg,
-    cloudCover: currentResponse.clouds.all,
-    visibility: currentResponse.visibility,
-    uvIndex: 0, // Not available in free tier
-    condition: {
-      main: currentResponse.weather[0].main,
-      description: currentResponse.weather[0].description,
-      id: currentResponse.weather[0].id,
-    },
-    icon: currentResponse.weather[0].icon,
-  };
-
-  // Transform hourly data from 5-day forecast (every 3 hours)
-  const hourly: WeatherData[] = forecastResponse.list.slice(0, 16).map((item) => ({
-    timestamp: item.dt,
-    temperature: item.main.temp,
-    feelsLike: item.main.feels_like,
-    humidity: item.main.humidity,
-    pressure: item.main.pressure,
-    windSpeed: item.wind.speed,
-    windDirection: item.wind.deg,
-    cloudCover: item.clouds.all,
-    visibility: item.visibility,
-    uvIndex: 0, // Not available in free tier
-    condition: {
-      main: item.weather[0].main,
-      description: item.weather[0].description,
-      id: item.weather[0].id,
-    },
-    icon: item.weather[0].icon,
-  }));
-
-  // Transform daily data by grouping forecast items by date
-  type ForecastItem = OpenWeatherMapForecastResponse['list'][number];
-  const dailyMap = new Map<string, ForecastItem[]>();
-  forecastResponse.list.forEach((item) => {
-    const date = item.dt_txt.split(' ')[0];
-    if (!dailyMap.has(date)) {
-      dailyMap.set(date, []);
-    }
-    dailyMap.get(date)!.push(item);
-  });
-
-  const daily: DailyWeatherData[] = Array.from(dailyMap.entries()).slice(0, 5).map(([date, items]) => {
-    const temps = items.map(item => item.main.temp);
-    const minTemp = Math.min(...temps);
-    const maxTemp = Math.max(...temps);
-    const avgTemp = temps.reduce((sum, temp) => sum + temp, 0) / temps.length;
-
-    // Use the middle item of the day for representative data
-    const representative = items[Math.floor(items.length / 2)];
-
-    return {
-      date,
-      temperature: avgTemp,
-      feelsLike: representative.main.feels_like,
-      humidity: representative.main.humidity,
-      pressure: representative.main.pressure,
-      windSpeed: representative.wind.speed,
-      windDirection: representative.wind.deg,
-      cloudCover: representative.clouds.all,
-      visibility: representative.visibility,
-      uvIndex: 0, // Not available in free tier
-      condition: {
-        main: representative.weather[0].main,
-        description: representative.weather[0].description,
-        id: representative.weather[0].id,
-      },
-      icon: representative.weather[0].icon,
-      sunrise: forecastResponse.city.sunrise,
-      sunset: forecastResponse.city.sunset,
-      moonPhase: 0, // Not available in free tier
-      temperatureMin: minTemp,
-      temperatureMax: maxTemp,
-      precipitationProbability: representative.pop * 100,
-      precipitationAmount: (representative.rain?.['3h'] || 0) + (representative.snow?.['3h'] || 0),
-    };
-  });
-
-  return {
-    current,
-    hourly,
-    daily,
-    location,
-    timezone: `UTC${forecastResponse.city.timezone >= 0 ? '+' : ''}${forecastResponse.city.timezone / 3600}`,
-    lastUpdated: new Date(),
+interface OpenMeteoCurrentResponse {
+  timezone: string;
+  utc_offset_seconds: number;
+  current: {
+    time: string;
+    temperature_2m: number;
+    apparent_temperature: number;
+    relative_humidity_2m: number;
+    surface_pressure: number;
+    wind_speed_10m: number;
+    wind_direction_10m: number;
+    cloud_cover: number;
+    weather_code: number;
+    is_day: number;
   };
 }
 
 /**
- * Fetches weather data from OpenWeatherMap free tier APIs
+ * Fetches current conditions from Open-Meteo (no API key required).
+ * Only the `current` block of WeatherForecast is consumed by the UI (header
+ * conditions + Calendar tint); the day-by-day gradient is served separately by
+ * openMeteoService.fetchWeatherForRange.
  */
 export async function fetchWeatherData(location: Location): Promise<WeatherForecast> {
-  if (!OPENWEATHER_API_KEY || OPENWEATHER_API_KEY === 'your-api-key-here') {
-    throw new Error('OpenWeatherMap API key is not configured. Please set VITE_OPENWEATHER_API_KEY in your environment variables.');
+  const url = new URL(OPEN_METEO_FORECAST_URL);
+  url.searchParams.set('latitude', location.latitude.toString());
+  url.searchParams.set('longitude', location.longitude.toString());
+  url.searchParams.set(
+    'current',
+    'temperature_2m,apparent_temperature,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,cloud_cover,weather_code,is_day',
+  );
+  url.searchParams.set('timezone', 'auto');
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error('Weather rate limit exceeded. Please try again later.');
+    }
+    throw new Error(`Weather API error: ${response.status} ${response.statusText}`);
   }
 
-  try {
-    // Fetch current weather
-    const currentUrl = new URL(OPENWEATHER_CURRENT_URL);
-    currentUrl.searchParams.set('lat', location.latitude.toString());
-    currentUrl.searchParams.set('lon', location.longitude.toString());
-    currentUrl.searchParams.set('appid', OPENWEATHER_API_KEY);
-    currentUrl.searchParams.set('units', 'metric');
+  const data: OpenMeteoCurrentResponse = await response.json();
+  const c = data.current;
+  const condition = describeWeatherCode(c.weather_code, c.is_day === 1);
 
-    // Fetch 5-day forecast
-    const forecastUrl = new URL(OPENWEATHER_FORECAST_URL);
-    forecastUrl.searchParams.set('lat', location.latitude.toString());
-    forecastUrl.searchParams.set('lon', location.longitude.toString());
-    forecastUrl.searchParams.set('appid', OPENWEATHER_API_KEY);
-    forecastUrl.searchParams.set('units', 'metric');
+  const current: WeatherData = {
+    timestamp: Math.floor(new Date(c.time).getTime() / 1000),
+    temperature: c.temperature_2m,
+    feelsLike: c.apparent_temperature,
+    humidity: c.relative_humidity_2m,
+    pressure: c.surface_pressure,
+    windSpeed: c.wind_speed_10m,
+    windDirection: c.wind_direction_10m,
+    cloudCover: c.cloud_cover,
+    visibility: 0,
+    uvIndex: 0,
+    condition: {
+      main: condition.main,
+      description: condition.description,
+      id: c.weather_code,
+    },
+    icon: condition.emoji,
+  };
 
-    const [currentResponse, forecastResponse] = await Promise.all([
-      fetch(currentUrl.toString()),
-      fetch(forecastUrl.toString())
-    ]);
-
-    if (!currentResponse.ok) {
-      if (currentResponse.status === 401) {
-        throw new Error('Invalid API key. Please check your OpenWeatherMap API key.');
-      } else if (currentResponse.status === 429) {
-        throw new Error('API rate limit exceeded. Please try again later.');
-      } else {
-        throw new Error(`Weather API error: ${currentResponse.status} ${currentResponse.statusText}`);
-      }
-    }
-
-    if (!forecastResponse.ok) {
-      if (forecastResponse.status === 401) {
-        throw new Error('Invalid API key. Please check your OpenWeatherMap API key.');
-      } else if (forecastResponse.status === 429) {
-        throw new Error('API rate limit exceeded. Please try again later.');
-      } else {
-        throw new Error(`Forecast API error: ${forecastResponse.status} ${forecastResponse.statusText}`);
-      }
-    }
-
-    const currentData: OpenWeatherMapCurrentResponse = await currentResponse.json();
-    const forecastData: OpenWeatherMapForecastResponse = await forecastResponse.json();
-
-    return transformWeatherData(currentData, forecastData, location);
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error('Failed to fetch weather data. Please check your internet connection.');
-  }
+  const offsetHours = data.utc_offset_seconds / 3600;
+  return {
+    current,
+    hourly: [],
+    daily: [],
+    location,
+    timezone: `UTC${offsetHours >= 0 ? '+' : ''}${offsetHours}`,
+    lastUpdated: new Date(),
+  };
 }
 
 /**
@@ -217,31 +126,39 @@ export function getCurrentLocation(): Promise<Location> {
   });
 }
 
+interface BigDataCloudReverseResponse {
+  city?: string;
+  locality?: string;
+  principalSubdivision?: string;
+  countryCode?: string;
+}
+
 /**
- * Reverse geocoding to get city and country from coordinates
+ * Reverse geocoding to get city and country from coordinates using
+ * BigDataCloud's keyless client-side endpoint (no API key required).
  */
 export async function reverseGeocode(location: Location): Promise<Location> {
-  const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${location.latitude}&lon=${location.longitude}&limit=1&appid=${OPENWEATHER_API_KEY}`;
-  
+  const url = new URL(REVERSE_GEOCODE_URL);
+  url.searchParams.set('latitude', location.latitude.toString());
+  url.searchParams.set('longitude', location.longitude.toString());
+  url.searchParams.set('localityLanguage', 'en');
+
   try {
-    const response = await fetch(url);
-    
+    const response = await fetch(url.toString());
     if (!response.ok) {
       // Return location without city/country if geocoding fails
       return location;
     }
-    
-    const data = await response.json();
-    
-    if (data.length > 0) {
-      return {
-        ...location,
-        city: data[0].name,
-        country: data[0].country,
-      };
-    }
-    
-    return location;
+
+    const data: BigDataCloudReverseResponse = await response.json();
+    const city = data.city || data.locality || data.principalSubdivision;
+    if (!city) return location;
+
+    return {
+      ...location,
+      city,
+      country: data.countryCode,
+    };
   } catch {
     // Return location without city/country if geocoding fails
     return location;
@@ -267,25 +184,25 @@ export function getCachedWeatherData(location: Location): WeatherForecast | null
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     if (!cached) return null;
-    
+
     const cacheData: WeatherCache = JSON.parse(cached);
     const now = Date.now();
-    
+
     // Check if cache is expired
     if (now - cacheData.timestamp > CACHE_DURATION) {
       localStorage.removeItem(CACHE_KEY);
       return null;
     }
-    
+
     // Check if location matches (within 0.01 degrees)
     const latDiff = Math.abs(cacheData.location.latitude - location.latitude);
     const lonDiff = Math.abs(cacheData.location.longitude - location.longitude);
-    
+
     if (latDiff > 0.01 || lonDiff > 0.01) {
       localStorage.removeItem(CACHE_KEY);
       return null;
     }
-    
+
     return cacheData.data;
   } catch {
     localStorage.removeItem(CACHE_KEY);
@@ -303,7 +220,7 @@ export function cacheWeatherData(data: WeatherForecast, location: Location): voi
       timestamp: Date.now(),
       location,
     };
-    
+
     localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
   } catch (error) {
     // Ignore cache errors
@@ -316,24 +233,24 @@ export function cacheWeatherData(data: WeatherForecast, location: Location): voi
  */
 export async function getWeatherData(location?: Location): Promise<WeatherForecast> {
   let targetLocation = location;
-  
+
   // Get current location if not provided
   if (!targetLocation) {
     targetLocation = await getCurrentLocation();
     targetLocation = await reverseGeocode(targetLocation);
   }
-  
+
   // Try to get cached data first
   const cachedData = getCachedWeatherData(targetLocation);
   if (cachedData) {
     return cachedData;
   }
-  
+
   // Fetch fresh data
   const weatherData = await fetchWeatherData(targetLocation);
-  
+
   // Cache the data
   cacheWeatherData(weatherData, targetLocation);
-  
+
   return weatherData;
 }

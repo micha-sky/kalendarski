@@ -1,17 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useApp } from '../contexts/useApp';
 import Calendar from './Calendar';
 import EventModal from './EventModal';
 import LocationPicker from './LocationPicker';
 import type { CalendarEvent } from '../types';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, Upload, Download, Rss } from 'lucide-react';
 import {
-  startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
+  startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths,
 } from 'date-fns';
+import { expandEvents } from '../services/recurrenceService';
+import { InstallButton } from './PWAPrompts';
+import SubscriptionManager from './SubscriptionManager';
 
 const MainLayout: React.FC = () => {
   const {
     events,
+    calendars,
     weatherData,
     viewState,
     location,
@@ -21,6 +25,8 @@ const MainLayout: React.FC = () => {
     addEvent,
     updateEvent,
     deleteEvent,
+    deleteOccurrence,
+    importEvents,
     refreshWeatherData,
     fetchWeatherForDates,
     setLocation,
@@ -33,6 +39,84 @@ const MainLayout: React.FC = () => {
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [eventModalDate, setEventModalDate] = useState<Date | null>(null);
   const [weatherErrorDismissed, setWeatherErrorDismissed] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [subscriptionsOpen, setSubscriptionsOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-dismiss the import/export status message.
+  useEffect(() => {
+    if (!importMsg) return;
+    const id = setTimeout(() => setImportMsg(null), 4000);
+    return () => clearTimeout(id);
+  }, [importMsg]);
+
+  /**
+   * What the views render: stored events with any recurring series expanded into
+   * concrete occurrences. Padded two months either side of the current date so
+   * navigating a month never lands on an unexpanded grid, and so the agenda
+   * view's 60-day horizon is always covered.
+   *
+   * Note this is intentionally NOT what import/export uses — those act on the
+   * stored masters, so a series exports as one VEVENT with an RRULE.
+   */
+  const visibleEvents = useMemo(() => expandEvents(events, {
+    rangeStart: startOfWeek(startOfMonth(subMonths(viewState.currentDate, 2))),
+    rangeEnd: endOfWeek(endOfMonth(addMonths(viewState.currentDate, 2))),
+  }), [events, viewState.currentDate]);
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same file be re-selected later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const now = new Date();
+      const rangeStart = new Date(now); rangeStart.setFullYear(now.getFullYear() - 1);
+      const rangeEnd = new Date(now); rangeEnd.setFullYear(now.getFullYear() + 2);
+      // Lazy-load the (heavy) ical.js-backed parser only when actually importing.
+      const { parseICSToEvents } = await import('../services/icsService');
+      const imported = parseICSToEvents(text, {
+        calendarId: calendars[0]?.id ?? 'default',
+        rangeStart,
+        rangeEnd,
+        color: '#8b5cf6',
+      });
+      if (imported.length === 0) {
+        setImportMsg(`No events found in ${file.name}.`);
+        return;
+      }
+      const added = importEvents(imported);
+      setImportMsg(
+        added > 0
+          ? `Imported ${added} event${added === 1 ? '' : 's'} from ${file.name}.`
+          : `${file.name} is already imported.`,
+      );
+    } catch {
+      setImportMsg(`Could not read ${file.name} — is it a valid .ics file?`);
+    }
+  };
+
+  const handleExport = async () => {
+    // Export only user-owned events — never ICS imports or read-only subscriptions.
+    const local = events.filter(ev => ev.source == null || ev.source === 'local');
+    if (local.length === 0) {
+      setImportMsg('No local events to export.');
+      return;
+    }
+    const { eventsToICS, icsExportFilename } = await import('../services/icsService');
+    const blob = new Blob([eventsToICS(local)], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = icsExportFilename();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setImportMsg(`Exported ${local.length} event${local.length === 1 ? '' : 's'}.`);
+  };
 
   // Fetch Open-Meteo data for the currently visible date range
   useEffect(() => {
@@ -87,8 +171,9 @@ const MainLayout: React.FC = () => {
     setEventModalDate(null);
   };
 
-  const handleEventDelete = (eventId: string) => {
-    deleteEvent(eventId);
+  const handleEventDelete = (eventId: string, scope: 'occurrence' | 'series' = 'series') => {
+    if (scope === 'occurrence') deleteOccurrence(eventId);
+    else deleteEvent(eventId);
     setIsEventModalOpen(false);
     setSelectedEvent(null);
   };
@@ -104,7 +189,10 @@ const MainLayout: React.FC = () => {
   return (
     <div className="h-dvh bg-white dark:bg-gray-900 relative overflow-hidden flex flex-col">
       {/* Slim top bar */}
-      <header className="relative z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
+      {/* Translucent so the calendar's ambient gradient (rendered inside <main>
+          at a lower z-index) carries continuously up behind the top bar rather
+          than stopping at a hard edge. */}
+      <header className="relative z-20 bg-white/75 dark:bg-gray-900/75 backdrop-blur-md border-b border-gray-200/70 dark:border-gray-800/70 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex-shrink-0">Kalendarski</h1>
           <LocationPicker currentLocation={weatherData?.location ?? location} onSelect={setLocation} />
@@ -116,15 +204,44 @@ const MainLayout: React.FC = () => {
           )}
           {weatherData?.current && (
             <div className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-              <img
-                src={`https://openweathermap.org/img/wn/${weatherData.current.icon}.png`}
-                alt={weatherData.current.condition.description}
-                className="w-6 h-6"
-              />
+              <span className="text-base leading-none" role="img" aria-label={weatherData.current.condition.description}>
+                {weatherData.current.icon}
+              </span>
               <span className="font-medium">{Math.round(weatherData.current.temperature)}°C</span>
               <span className="hidden sm:inline text-gray-400 dark:text-gray-500 capitalize">{weatherData.current.condition.description}</span>
             </div>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".ics,text/calendar"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+          <button
+            onClick={handleImportClick}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Import calendar (.ics)"
+            title="Import .ics"
+          >
+            <Upload size={16} />
+          </button>
+          <button
+            onClick={handleExport}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Export calendar (.ics)"
+            title="Export .ics"
+          >
+            <Download size={16} />
+          </button>
+          <button
+            onClick={() => setSubscriptionsOpen(true)}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Calendar subscriptions"
+            title="Subscribe to a calendar"
+          >
+            <Rss size={16} />
+          </button>
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
             className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -132,12 +249,27 @@ const MainLayout: React.FC = () => {
           >
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+          <InstallButton />
         </div>
       </header>
 
+      {/* Import/export status */}
+      {importMsg && (
+        <div className="relative z-20 flex items-center justify-between px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200 flex-shrink-0">
+          <span>{importMsg}</span>
+          <button
+            onClick={() => setImportMsg(null)}
+            className="text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-100 ml-4"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Weather error banner */}
       {showWeatherError && (
-        <div className="relative z-10 flex items-center justify-between px-4 py-2 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex-shrink-0">
+        <div className="relative z-20 flex items-center justify-between px-4 py-2 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex-shrink-0">
           <span>{error!.message}</span>
           <div className="flex items-center gap-3 ml-4">
             <button
@@ -160,7 +292,7 @@ const MainLayout: React.FC = () => {
       {/* Calendar — fills remaining screen */}
       <main className="relative z-10 flex-1 overflow-hidden">
         <Calendar
-          events={events}
+          events={visibleEvents}
           viewState={viewState}
           onViewStateChange={setViewState}
           onEventClick={handleEventClick}
@@ -178,9 +310,11 @@ const MainLayout: React.FC = () => {
         event={selectedEvent}
         initialDate={eventModalDate}
         onSave={handleEventSave}
-        onDelete={selectedEvent ? () => handleEventDelete(selectedEvent.id) : undefined}
+        onDelete={selectedEvent ? (scope) => handleEventDelete(selectedEvent.id, scope) : undefined}
         onClose={handleModalClose}
       />
+
+      <SubscriptionManager open={subscriptionsOpen} onClose={() => setSubscriptionsOpen(false)} />
     </div>
   );
 };

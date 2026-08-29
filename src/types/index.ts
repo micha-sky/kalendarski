@@ -1,3 +1,7 @@
+// Where an event came from. All sources map into the same CalendarEvent shape
+// so the UI never branches on provider. Absent = treat as a local event.
+export type EventSource = 'local' | 'ics' | 'subscription';
+
 // Calendar and Event Types
 export interface CalendarEvent {
   id: string;
@@ -9,8 +13,17 @@ export interface CalendarEvent {
   calendarId: string;
   color?: string;
   location?: string;
+  /** Resolved coordinates for `location`, enabling per-event weather. Optional:
+   *  free-text locations (or ICS imports) may have no coordinates. */
+  locationCoords?: { latitude: number; longitude: number; timezone?: string };
   attendees?: string[];
+  /** Present on the stored master event of a series. Occurrences are derived
+   *  from it on read (see recurrenceService), never persisted. */
   recurrence?: RecurrenceRule;
+  /** Set only on a generated occurrence, pointing back at its master's id.
+   *  Absent on stored events. */
+  seriesId?: string;
+  source?: EventSource;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -31,11 +44,18 @@ export interface Calendar {
 
 export interface RecurrenceRule {
   frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  /** Repeat every N units of `frequency`. Must be >= 1. */
   interval: number;
+  /** Last date an occurrence may start on. Mutually exclusive with `count`. */
   endDate?: Date;
+  /** Total number of occurrences the rule generates. Excluded dates still
+   *  consume one, per RFC 5545. Mutually exclusive with `endDate`. */
   count?: number;
+  /** Weekly rules only: days to repeat on, JS convention (0 = Sunday). */
   byWeekDay?: number[];
   byMonthDay?: number[];
+  /** Start instants of occurrences the user deleted individually (EXDATE). */
+  exDates?: Date[];
 }
 
 // Weather Types
@@ -116,113 +136,18 @@ export interface WeatherHeatmapData {
   isNight: boolean;
 }
 
-// API Response Types for OpenWeatherMap Free Tier
-export interface OpenWeatherMapCurrentResponse {
-  coord: {
-    lon: number;
-    lat: number;
-  };
-  weather: Array<{
-    id: number;
-    main: string;
-    description: string;
-    icon: string;
-  }>;
-  base: string;
-  main: {
-    temp: number;
-    feels_like: number;
-    temp_min: number;
-    temp_max: number;
-    pressure: number;
-    humidity: number;
-  };
-  visibility: number;
-  wind: {
-    speed: number;
-    deg: number;
-  };
-  clouds: {
-    all: number;
-  };
-  dt: number;
-  sys: {
-    type: number;
-    id: number;
-    country: string;
-    sunrise: number;
-    sunset: number;
-  };
-  timezone: number;
-  id: number;
-  name: string;
-  cod: number;
-}
-
-export interface OpenWeatherMapForecastResponse {
-  cod: string;
-  message: number;
-  cnt: number;
-  list: Array<{
-    dt: number;
-    main: {
-      temp: number;
-      feels_like: number;
-      temp_min: number;
-      temp_max: number;
-      pressure: number;
-      sea_level: number;
-      grnd_level: number;
-      humidity: number;
-      temp_kf: number;
-    };
-    weather: Array<{
-      id: number;
-      main: string;
-      description: string;
-      icon: string;
-    }>;
-    clouds: {
-      all: number;
-    };
-    wind: {
-      speed: number;
-      deg: number;
-      gust?: number;
-    };
-    visibility: number;
-    pop: number;
-    rain?: {
-      '3h': number;
-    };
-    snow?: {
-      '3h': number;
-    };
-    sys: {
-      pod: string;
-    };
-    dt_txt: string;
-  }>;
-  city: {
-    id: number;
-    name: string;
-    coord: {
-      lat: number;
-      lon: number;
-    };
-    country: string;
-    population: number;
-    timezone: number;
-    sunrise: number;
-    sunset: number;
-  };
-}
-
 // Per-day hourly weather cache (keyed by 'yyyy-MM-dd')
 export interface DayCacheEntry {
   hourlyTemps: (number | null)[];              // 24 values, index = hour
   cloudCover: (number | null)[];               // 24 values
   precipitationProbability?: (number | null)[]; // 24 values, 0-100; forecast only
+  /** 24 values, mm falling in that hour. Available on both forecast and archive.
+   *  This is what "it rains at 15:00" is decided on — a probability never
+   *  commits to an hour, an amount does. */
+  precipitationMm?: (number | null)[];
+  /** 24 values, WMO weather code. Separates rain from snow/sleet so the hour
+   *  marker can say which. */
+  weatherCode?: (number | null)[];
   sunriseHour: number;
   sunsetHour: number;
   fetchedAt: number;               // Date.now()

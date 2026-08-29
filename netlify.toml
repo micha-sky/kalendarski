@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 7 needs a modern Node; pin it so the build doesn't fall back to an old default.
+  NODE_VERSION = "20.19.0"
+
+[functions]
+  node_bundler = "esbuild"
+  # server/icsProxyCore.js is imported by the function but lives outside the
+  # functions dir — make sure it gets bundled.
+  included_files = ["server/**"]

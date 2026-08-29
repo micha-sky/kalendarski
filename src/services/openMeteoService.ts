@@ -14,6 +14,8 @@ interface OpenMeteoResponse {
     temperature_2m: number[];
     cloud_cover: number[];
     precipitation_probability?: number[];
+    precipitation?: number[];
+    weather_code?: number[];
   };
   daily: {
     time: string[];
@@ -37,30 +39,43 @@ function parseResponse(data: OpenMeteoResponse, today: string): Record<string, D
   }
 
   // Bucket hourly readings by date
-  const byDate = new Map<string, { temps: (number | null)[]; clouds: (number | null)[]; precip: (number | null)[] }>();
+  interface Bucket {
+    temps: (number | null)[];
+    clouds: (number | null)[];
+    precip: (number | null)[];
+    precipMm: (number | null)[];
+    codes: (number | null)[];
+  }
+  const byDate = new Map<string, Bucket>();
   data.hourly.time.forEach((timeStr, i) => {
     const [dateStr, hourPart] = timeStr.split('T');
     const hour = parseInt(hourPart.split(':')[0], 10);
     if (!byDate.has(dateStr)) {
       byDate.set(dateStr, {
-        temps:  new Array(24).fill(null),
-        clouds: new Array(24).fill(null),
-        precip: new Array(24).fill(null),
+        temps:    new Array(24).fill(null),
+        clouds:   new Array(24).fill(null),
+        precip:   new Array(24).fill(null),
+        precipMm: new Array(24).fill(null),
+        codes:    new Array(24).fill(null),
       });
     }
     const bucket = byDate.get(dateStr)!;
-    bucket.temps[hour]  = data.hourly.temperature_2m[i] ?? null;
-    bucket.clouds[hour] = data.hourly.cloud_cover[i]   ?? null;
-    bucket.precip[hour] = data.hourly.precipitation_probability?.[i] ?? null;
+    bucket.temps[hour]    = data.hourly.temperature_2m[i] ?? null;
+    bucket.clouds[hour]   = data.hourly.cloud_cover[i]   ?? null;
+    bucket.precip[hour]   = data.hourly.precipitation_probability?.[i] ?? null;
+    bucket.precipMm[hour] = data.hourly.precipitation?.[i] ?? null;
+    bucket.codes[hour]    = data.hourly.weather_code?.[i] ?? null;
   });
 
   const result: Record<string, DayCacheEntry> = {};
-  for (const [dateStr, { temps, clouds, precip }] of byDate) {
+  for (const [dateStr, { temps, clouds, precip, precipMm, codes }] of byDate) {
     const sun = sunMap.get(dateStr);
     result[dateStr] = {
       hourlyTemps:              temps,
       cloudCover:               clouds,
       precipitationProbability: precip,
+      precipitationMm:          precipMm,
+      weatherCode:              codes,
       sunriseHour:  sun?.sunriseHour ?? 6,
       sunsetHour:   sun?.sunsetHour  ?? 20,
       fetchedAt:    now,
@@ -88,7 +103,7 @@ async function fetchForecast(
   const url = new URL(FORECAST_URL);
   url.searchParams.set('latitude',     location.latitude.toString());
   url.searchParams.set('longitude',    location.longitude.toString());
-  url.searchParams.set('hourly',       'temperature_2m,cloud_cover,precipitation_probability');
+  url.searchParams.set('hourly',       'temperature_2m,cloud_cover,precipitation_probability,precipitation,weather_code');
   url.searchParams.set('daily',        'sunrise,sunset');
   url.searchParams.set('timezone',     'auto');
   url.searchParams.set('past_days',    pastDays.toString());
@@ -110,7 +125,9 @@ async function fetchArchive(
   url.searchParams.set('longitude',  location.longitude.toString());
   url.searchParams.set('start_date', format(startDate, 'yyyy-MM-dd'));
   url.searchParams.set('end_date',   format(endDate,   'yyyy-MM-dd'));
-  url.searchParams.set('hourly',     'temperature_2m,cloud_cover');
+  // The archive endpoint has no precipitation_probability — for a past day the
+  // measured amount is the better answer anyway.
+  url.searchParams.set('hourly',     'temperature_2m,cloud_cover,precipitation,weather_code');
   url.searchParams.set('daily',      'sunrise,sunset');
   url.searchParams.set('timezone',   'auto');
 

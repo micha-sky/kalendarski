@@ -4,6 +4,15 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import type { CalendarEvent, CalendarViewState, WeatherForecast, DayCacheEntry } from '../types';
 import { clsx } from 'clsx';
 import { temperatureToRgba, interpolateDailyTemp, temperatureToRgbaEnhanced, daytimeColorFromRange } from '../utils/weatherHeatmap';
+import {
+  summarizeDay,
+  precipitationByHour,
+  formatPrecipRun,
+  precipRunEmoji,
+  type DaySummary,
+  type PrecipKind,
+} from '../services/dayWeatherSummary';
+import { useHourRangeMode, computeVisibleHours } from '../hooks/useHourRange';
 import { useApp } from '../contexts/useApp';
 
 interface CalendarProps {
@@ -67,6 +76,58 @@ const GradientCanvas = ({
   );
 };
 
+// Bleeds the current view's heatmap out past the grid and behind the whole app.
+// It is the same canvas the grid uses, blown up and blurred into colour fields —
+// so the background can never drift out of agreement with the calendar. Kept
+// deliberately faint and veiled: it should read as the room's light changing,
+// not as a second thing to look at.
+const AmbientBackdrop = ({ colors, theme }: { colors: (string | undefined)[][]; theme: 'light' | 'dark' }) => {
+  if (!colors.length || !colors[0]?.length) return null;
+
+  return (
+    <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden" aria-hidden="true">
+      <GradientCanvas
+        colors={colors}
+        style={{
+          // Overscaled so the blur's soft edges fall outside the viewport
+          // instead of leaving a pale frame around it.
+          top: '-25%',
+          left: '-25%',
+          width: '150%',
+          height: '150%',
+          filter: 'blur(72px) saturate(1.3)',
+          opacity: theme === 'dark' ? 0.6 : 0.55,
+        }}
+      />
+      {/* Veil: holds body text at its normal contrast over any gradient tone. */}
+      <div
+        className="absolute inset-0"
+        style={{ backgroundColor: theme === 'dark' ? 'rgba(17,24,39,0.62)' : 'rgba(255,255,255,0.6)' }}
+      />
+    </div>
+  );
+};
+
+// The in-grid marker for "precipitation falls in this hour".
+//
+// A hatch rather than a tint: a tint would read as another temperature and
+// corrupt the heatmap, whereas a texture sits on top of any gradient tone
+// without claiming to be one. Kept fine and low-contrast so the gradient stays
+// the thing you see first — it only has to survive, not shout.
+function precipHatchStyle(kind: PrecipKind, theme: 'light' | 'dark'): React.CSSProperties {
+  if (kind === 'snow') {
+    const dot = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.9)';
+    return {
+      backgroundImage: `radial-gradient(circle at 50% 50%, ${dot} 0.9px, transparent 1px)`,
+      backgroundSize: '8px 8px',
+    };
+  }
+  const line = theme === 'dark' ? 'rgba(147,197,253,0.32)' : 'rgba(30,64,175,0.26)';
+  return {
+    backgroundImage: `repeating-linear-gradient(115deg, ${line} 0 1px, transparent 1px 7px)`,
+  };
+}
+
 const Calendar: React.FC<CalendarProps> = ({
   events,
   viewState,
@@ -80,6 +141,7 @@ const Calendar: React.FC<CalendarProps> = ({
 }) => {
   const { theme } = useApp();
   const [hoveredDate, setHoveredDate] = useState<Date | null>(null);
+  const [hourRangeMode, setHourRangeMode] = useHourRangeMode();
   // Fallback cell color used where there's no weather data to derive a gradient from
   const emptyCellColor = theme === 'dark' ? 'rgb(31,41,55)' : 'rgb(248,250,252)';
   const outOfMonthCellColor = theme === 'dark' ? 'rgb(17,24,39)' : 'rgb(243,244,246)';
@@ -171,48 +233,43 @@ const Calendar: React.FC<CalendarProps> = ({
   }, [dayWeatherCache, weatherData, periodMin, periodMax]);
 
   // --- Weather badge helpers ---
-  const getWeatherEmoji = (cloudPct: number, rainPct: number): string => {
-    if (rainPct > 60) return '🌧️';
-    if (rainPct > 20) return '🌦️';
-    if (cloudPct < 20) return '☀️';
-    if (cloudPct < 50) return '🌤️';
-    if (cloudPct < 75) return '⛅';
-    return '☁️';
-  };
-
-  const getDayWeather = useCallback((day: Date): { temp: number; emoji: string; rainPercent: number } | null => {
+  // Single source of truth for "what was the weather that day" — every view
+  // reads this, so the month cell and the week header can never disagree.
+  const getDaySummary = useCallback((day: Date): DaySummary | null => {
     const dayKey = format(day, 'yyyy-MM-dd');
     const entry = dayWeatherCache?.[dayKey];
+    if (entry) return summarizeDay(entry);
 
-    if (entry) {
-      const daytimeSlots: number[] = [];
-      for (let h = entry.sunriseHour; h <= entry.sunsetHour; h++) daytimeSlots.push(h);
-
-      const daytimeTemps = daytimeSlots.map(h => entry.hourlyTemps[h]).filter((t): t is number => t != null);
-      const daytimeClouds = daytimeSlots.map(h => entry.cloudCover[h]).filter((c): c is number => c != null);
-      const allPrecip = (entry.precipitationProbability ?? []).filter((p): p is number => p != null);
-
-      if (!daytimeTemps.length) return null;
-
-      const avgTemp = daytimeTemps.reduce((a, b) => a + b, 0) / daytimeTemps.length;
-      const avgCloud = daytimeClouds.length
-        ? daytimeClouds.reduce((a, b) => a + b, 0) / daytimeClouds.length
-        : 0;
-      const maxRain = allPrecip.length ? Math.max(...allPrecip) : 0;
-
-      return { temp: Math.round(avgTemp), emoji: getWeatherEmoji(avgCloud, maxRain), rainPercent: Math.round(maxRain) };
-    }
-
-    // Fallback: OWM daily data
+    // Fallback: daily-resolution provider data. No hourly precipitation, so
+    // there are no runs to report — only the day-level probability.
     const dayData = weatherData?.daily.find(d => d.date === dayKey);
     if (dayData) {
-      const avgTemp = (dayData.temperatureMin + dayData.temperatureMax) / 2;
+      const cloud = dayData.cloudCover;
       const rainPercent = Math.round(dayData.precipitationProbability ?? 0);
-      return { temp: Math.round(avgTemp), emoji: getWeatherEmoji(dayData.cloudCover, rainPercent), rainPercent };
+      const emoji =
+        rainPercent > 60 ? '🌧️'
+        : rainPercent > 20 ? '🌦️'
+        : cloud < 20 ? '☀️'
+        : cloud < 50 ? '🌤️'
+        : cloud < 75 ? '⛅'
+        : '☁️';
+      return {
+        high: Math.round(dayData.temperatureMax),
+        low: Math.round(dayData.temperatureMin),
+        emoji,
+        rainPercent,
+        precipRuns: [],
+      };
     }
 
     return null;
   }, [dayWeatherCache, weatherData]);
+
+  /** Which hours of a given day have precipitation — drives the in-grid markers. */
+  const getPrecipHours = useCallback((day: Date): Map<number, PrecipKind> => {
+    const entry = dayWeatherCache?.[format(day, 'yyyy-MM-dd')];
+    return entry ? precipitationByHour(entry) : new Map();
+  }, [dayWeatherCache]);
 
   const { currentDate, viewType } = viewState;
 
@@ -243,6 +300,13 @@ const Calendar: React.FC<CalendarProps> = ({
 
   const navigateToday = () => {
     onViewStateChange({ ...viewState, currentDate: new Date() });
+  };
+
+  // Drilling down from a month cell. Deliberately does NOT also call
+  // onDateClick — both route through the same setViewState, so the second call
+  // would overwrite the first from a stale viewState.
+  const openDay = (day: Date) => {
+    onViewStateChange({ ...viewState, currentDate: day, selectedDate: day, viewType: 'day' });
   };
 
   // Get calendar days for month view
@@ -288,18 +352,60 @@ const Calendar: React.FC<CalendarProps> = ({
     return eachDayOfInterval({ start: weekStart, end: weekEnd });
   }, [currentDate]);
 
+  const dayViewDays = useMemo(() => [currentDate], [currentDate]);
+
+  // The hours the timeline views render. Derived per view because a week's
+  // daylight span is the union of seven days' and a day's is just its own.
+  const weekVisibleHours = useMemo(
+    () => computeVisibleHours(
+      hourRangeMode,
+      weekViewDays,
+      weekViewDays.map(d => format(d, 'yyyy-MM-dd')),
+      dayWeatherCache,
+      events,
+    ),
+    [hourRangeMode, weekViewDays, dayWeatherCache, events],
+  );
+
+  const dayVisibleHours = useMemo(
+    () => computeVisibleHours(
+      hourRangeMode,
+      dayViewDays,
+      [format(currentDate, 'yyyy-MM-dd')],
+      dayWeatherCache,
+      events,
+    ),
+    [hourRangeMode, dayViewDays, currentDate, dayWeatherCache, events],
+  );
+
   const weekColorGrid = useMemo<string[][]>(() =>
-    Array.from({ length: 24 }, (_, hour) =>
+    weekVisibleHours.map(hour =>
       weekViewDays.map(day => getCellColor(day, hour) ?? emptyCellColor)
     ),
-  [weekViewDays, getCellColor, emptyCellColor]);
+  [weekVisibleHours, weekViewDays, getCellColor, emptyCellColor]);
+
+  const dayColorColumn = useMemo<string[]>(
+    () => dayVisibleHours.map(h => getCellColor(currentDate, h) ?? emptyCellColor),
+    [dayVisibleHours, currentDate, getCellColor, emptyCellColor],
+  );
 
   const dayViewGradient = useMemo(() => {
-    const stops = Array.from({ length: 24 }, (_, h) =>
-      `${getCellColor(currentDate, h) ?? emptyCellColor} ${((h / 23) * 100).toFixed(1)}%`
-    ).join(', ');
+    const last = dayColorColumn.length - 1;
+    if (last < 0) return emptyCellColor;
+    if (last === 0) return dayColorColumn[0];
+    const stops = dayColorColumn
+      .map((color, i) => `${color} ${((i / last) * 100).toFixed(1)}%`)
+      .join(', ');
     return `linear-gradient(to bottom, ${stops})`;
-  }, [currentDate, getCellColor, emptyCellColor]);
+  }, [dayColorColumn, emptyCellColor]);
+
+  // Colours feeding the blurred page backdrop — whatever the active view is
+  // showing, so the background follows you as you navigate.
+  const ambientColors = useMemo<(string | undefined)[][]>(() => {
+    if (viewType === 'week') return weekColorGrid;
+    if (viewType === 'day') return dayColorColumn.map(c => [c]);
+    return monthColorGrid;
+  }, [viewType, weekColorGrid, dayColorColumn, monthColorGrid]);
 
   const renderMonthView = () => {
     const days = monthDays;
@@ -326,23 +432,38 @@ const Calendar: React.FC<CalendarProps> = ({
             const isCurrentMonth = isSameMonth(day, currentDate);
             const isSelected = viewState.selectedDate && isSameDay(day, viewState.selectedDate);
             const isTodayDate = isToday(day);
-            const dayWeather = getDayWeather(day);
+            const dayWeather = getDaySummary(day);
             const isHovered = hoveredDate && isSameDay(hoveredDate, day);
+            // Screen readers get the weather even when it's visually dropped in narrow cells.
+            const weatherLabel = dayWeather
+              ? `, high ${dayWeather.high} degrees, low ${dayWeather.low} degrees`
+                + (dayWeather.precipRuns.length
+                  ? `, ${dayWeather.precipRuns[0].kind} from ${formatPrecipRun(dayWeather.precipRuns[0]).replace('–', ' to ')}`
+                  : dayWeather.rainPercent > 0
+                    ? `, ${dayWeather.rainPercent}% chance of precipitation`
+                    : '')
+              : '';
 
             return (
               <div
                 key={day.toISOString()}
                 className={clsx(
-                  'relative min-h-[100px] p-2 border-r border-b border-black/[0.06] dark:border-white/[0.08] cursor-pointer z-[1]',
+                  'dc-cell relative min-h-[100px] p-2 border-r border-b border-black/[0.06] dark:border-white/[0.08] cursor-pointer z-[1]',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
                   { 'text-gray-400 dark:text-gray-500': !isCurrentMonth }
                 )}
-                onClick={() => { onDateClick(day); onCreateEvent(day); }}
+                onClick={() => openDay(day)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openDay(day);
+                  }
+                }}
                 onMouseEnter={() => setHoveredDate(day)}
                 onMouseLeave={() => setHoveredDate(null)}
                 tabIndex={0}
                 role="gridcell"
-                aria-label={format(day, 'MMMM d, yyyy')}
+                aria-label={`${format(day, 'MMMM d, yyyy')}${weatherLabel}. Open day view`}
               >
                 {/* Selection / hover highlight */}
                 {isSelected && (
@@ -352,45 +473,58 @@ const Calendar: React.FC<CalendarProps> = ({
                   <div className="absolute inset-0 bg-white/20 dark:bg-white/10 pointer-events-none" style={{ zIndex: 20 }} />
                 )}
 
-                {/* Date number + weather badge / add button */}
-                <div className="flex items-start justify-between mb-1">
+                {/* Top row: day number (left) and, on hover, the add button (right).
+                    Deterministic slots — the number never shares horizontal space
+                    with the weather, so they cannot collide. */}
+                <div className="flex items-start justify-between gap-1 mb-1">
                   <span
-                    className={clsx(
-                      'text-sm font-medium leading-none',
-                      {
-                        'text-white bg-blue-500 rounded-full w-6 h-6 flex items-center justify-center shadow-sm': isTodayDate,
-                        'text-gray-800 dark:text-gray-200': isCurrentMonth && !isTodayDate,
-                        'text-gray-400 dark:text-gray-500': !isCurrentMonth,
-                      }
-                    )}
+                    className={clsx('dc-daynum', {
+                      'dc-daynum--today': isTodayDate,
+                      'dc-daynum--muted': !isCurrentMonth,
+                    })}
                   >
                     {format(day, 'd')}
                   </span>
 
-                  <div className="flex flex-col items-end gap-0.5">
-                    {dayWeather && !isHovered && (
-                      <div className="flex items-center gap-0.5 text-[9px] leading-none text-gray-700/80 dark:text-gray-300/80">
-                        <span>{dayWeather.emoji}</span>
-                        <span className="font-medium">{dayWeather.temp}°</span>
-                        {dayWeather.rainPercent > 0 && (
-                          <span className="text-blue-600/80 dark:text-blue-400/80">💧{dayWeather.rainPercent}%</span>
+                  {isHovered && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCreateEvent(day);
+                      }}
+                      className="w-5 h-5 shrink-0 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-sm"
+                      aria-label="Add event"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Weather row: full cell width, progressive disclosure by cell
+                    width (see .dc-weather container queries). aria-hidden — the
+                    cell's aria-label already announces the weather. */}
+                {dayWeather && !isHovered && (
+                  <div className="mb-1 flex flex-col items-start gap-0.5" aria-hidden="true">
+                    <div className="dc-weather">
+                      <span className="dc-wx-icon">{dayWeather.emoji}</span>
+                      <span className="dc-wx-temp">{dayWeather.high}°</span>
+                      {/* The slash only exists when the low is actually shown,
+                          so a narrow cell never renders a dangling "27° /". */}
+                      <span className="dc-wx-lo">/ {dayWeather.low}°</span>
+                    </div>
+                    {dayWeather.precipRuns.length > 0 ? (
+                      <div className="dc-wx-rain">
+                        <span>{precipRunEmoji(dayWeather.precipRuns[0].kind)}</span>
+                        <span>{formatPrecipRun(dayWeather.precipRuns[0])}</span>
+                        {dayWeather.precipRuns.length > 1 && (
+                          <span className="opacity-70">+{dayWeather.precipRuns.length - 1}</span>
                         )}
                       </div>
-                    )}
-                    {isHovered && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCreateEvent(day);
-                        }}
-                        className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-sm"
-                        aria-label="Add event"
-                      >
-                        <Plus size={12} />
-                      </button>
-                    )}
+                    ) : dayWeather.rainPercent > 0 ? (
+                      <div className="dc-wx-rain">💧{dayWeather.rainPercent}%</div>
+                    ) : null}
                   </div>
-                </div>
+                )}
 
                 {/* Events */}
                 <div className="space-y-1">
@@ -472,6 +606,36 @@ const Calendar: React.FC<CalendarProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Hour-range toggle — only the timeline views have hours to trim. */}
+          {(viewType === 'week' || viewType === 'day') && (
+            <div
+              className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1"
+              role="group"
+              aria-label="Hours shown"
+            >
+              {([
+                ['daylight', 'Daylight', 'Show only the hours the sun is up (plus any hour with an event)'],
+                ['full', '24h', 'Show all twenty-four hours'],
+              ] as const).map(([mode, label, title]) => (
+                <button
+                  key={mode}
+                  onClick={() => setHourRangeMode(mode)}
+                  title={title}
+                  aria-pressed={hourRangeMode === mode}
+                  className={clsx(
+                    'px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors',
+                    {
+                      'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm': hourRangeMode === mode,
+                      'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100': hourRangeMode !== mode,
+                    }
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* View type selector */}
           <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
             {(['month', 'week', 'day', 'agenda'] as const).map((type) => (
@@ -550,6 +714,9 @@ const Calendar: React.FC<CalendarProps> = ({
       );
     };
 
+    // Wet hours per day, resolved once instead of per hour cell.
+    const weekPrecipByDay = weekDays.map(day => getPrecipHours(day));
+
     return (
       <div className="flex-1 min-h-0 flex flex-col rounded-lg shadow-sm border border-white/30 dark:border-gray-700/30 overflow-hidden">
         {/* Week view header */}
@@ -572,7 +739,7 @@ const Calendar: React.FC<CalendarProps> = ({
             {weekDays.map((day) => {
               const isCurrentDay = isSameDay(day, today);
               const dayEvents = getEventsForDay(day);
-              const dayWeather = getDayWeather(day);
+              const dayWeather = getDaySummary(day);
 
               return (
                 <div
@@ -606,9 +773,22 @@ const Calendar: React.FC<CalendarProps> = ({
                   {dayWeather && (
                     <div className="flex items-center justify-center gap-0.5 text-[9px] leading-none text-gray-600 dark:text-gray-400">
                       <span>{dayWeather.emoji}</span>
-                      <span>{dayWeather.temp}°</span>
-                      {dayWeather.rainPercent > 0 && (
-                        <span className="text-blue-500 dark:text-blue-400">💧{dayWeather.rainPercent}%</span>
+                      <span className="font-semibold text-gray-800 dark:text-gray-200">{dayWeather.high}°</span>
+                      {/* Below sm each column is under ~80px — drop the low
+                          rather than let the pair collide with its neighbour. */}
+                      <span className="hidden sm:inline opacity-70">{dayWeather.low}°</span>
+                    </div>
+                  )}
+                  {dayWeather && (dayWeather.precipRuns.length > 0 || dayWeather.rainPercent > 0) && (
+                    <div className="mt-0.5 text-[9px] leading-none text-blue-600 dark:text-blue-300 truncate">
+                      {dayWeather.precipRuns.length > 0 ? (
+                        <>
+                          {precipRunEmoji(dayWeather.precipRuns[0].kind)}
+                          {formatPrecipRun(dayWeather.precipRuns[0])}
+                          {dayWeather.precipRuns.length > 1 && ` +${dayWeather.precipRuns.length - 1}`}
+                        </>
+                      ) : (
+                        <>💧{dayWeather.rainPercent}%</>
                       )}
                     </div>
                   )}
@@ -673,7 +853,7 @@ const Calendar: React.FC<CalendarProps> = ({
                   colors={weekColorGrid}
                   style={{ left: '12.5%', width: '87.5%' }}
                 />
-                {Array.from({ length: 24 }, (_, hour) => {
+                {weekVisibleHours.map((hour) => {
                   const isCurrentHour = isSameDay(currentDate, today) && hour === currentHour;
                   return (
                     <div
@@ -688,8 +868,9 @@ const Calendar: React.FC<CalendarProps> = ({
                       </div>
 
                       {/* Day columns — transparent, canvas gradient shows through */}
-                      {weekDays.map((day) => {
+                      {weekDays.map((day, dayIndex) => {
                         const dayEvents = getEventsForDayAndHour(day, hour);
+                        const precipKind = weekPrecipByDay[dayIndex].get(hour);
                         return (
                           <div
                             key={`${day.toISOString()}-${hour}`}
@@ -703,7 +884,16 @@ const Calendar: React.FC<CalendarProps> = ({
                               eventDate.setHours(hour, 0, 0, 0);
                               onCreateEvent(eventDate);
                             }}
+                            title={precipKind ? `${precipKind === 'snow' ? 'Snow' : 'Rain'} at ${String(hour).padStart(2, '0')}:00` : undefined}
                           >
+                            {/* Precipitation in this exact hour. */}
+                            {precipKind && (
+                              <div
+                                className="absolute inset-0 pointer-events-none"
+                                aria-hidden="true"
+                                style={precipHatchStyle(precipKind, theme)}
+                              />
+                            )}
                             {dayEvents.map((event) => (
                               <div
                                 key={event.id}
@@ -737,10 +927,12 @@ const Calendar: React.FC<CalendarProps> = ({
   };
 
   const renderDayView = () => {
-    const hours = Array.from({ length: 24 }, (_, i) => i);
+    const hours = dayVisibleHours;
     const dayEvents = getEventsForDate(currentDate);
     const currentHour = new Date().getHours();
     const isToday = isSameDay(currentDate, new Date());
+    const daySummary = getDaySummary(currentDate);
+    const precipHours = getPrecipHours(currentDate);
 
     // Get events for a specific hour
     const getEventsForHour = (hour: number) => {
@@ -756,15 +948,35 @@ const Calendar: React.FC<CalendarProps> = ({
       <div className="flex-1 min-h-0 flex flex-col rounded-lg shadow-sm border border-white/30 dark:border-gray-700/30 overflow-hidden">
         {/* Day view header */}
         <div className="flex-shrink-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm border-b border-white/30 dark:border-gray-700/30 p-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
               {format(currentDate, 'EEEE, MMMM d, yyyy')}
             </h2>
-            {isToday && (
-              <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-                {format(new Date(), 'HH:mm')}
-              </div>
-            )}
+            <div className="flex items-center gap-3 flex-shrink-0">
+              {daySummary && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                  <span aria-hidden="true">{daySummary.emoji}</span>
+                  <span>
+                    <span className="font-semibold text-gray-900 dark:text-gray-100">{daySummary.high}°</span>
+                    <span className="opacity-70"> / {daySummary.low}°</span>
+                  </span>
+                  {daySummary.precipRuns.length > 0 ? (
+                    <span className="text-blue-600 dark:text-blue-300">
+                      {daySummary.precipRuns
+                        .map(run => `${precipRunEmoji(run.kind)}${formatPrecipRun(run)}`)
+                        .join(' ')}
+                    </span>
+                  ) : daySummary.rainPercent > 0 ? (
+                    <span className="text-blue-600 dark:text-blue-300">💧{daySummary.rainPercent}%</span>
+                  ) : null}
+                </div>
+              )}
+              {isToday && (
+                <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                  {format(new Date(), 'HH:mm')}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -778,6 +990,7 @@ const Calendar: React.FC<CalendarProps> = ({
               {hours.map((hour) => {
                 const hourEvents = getEventsForHour(hour);
                 const isCurrentHour = isToday && hour === currentHour;
+                const precipKind = precipHours.get(hour);
 
                 return (
                   <div
@@ -792,10 +1005,19 @@ const Calendar: React.FC<CalendarProps> = ({
                     )}
 
                     {/* Time column */}
-                    <div className="w-14 flex-shrink-0 px-1 flex items-center justify-center border-r border-black/10 dark:border-white/10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
+                    <div className="w-14 flex-shrink-0 px-1 flex items-center justify-center gap-0.5 border-r border-black/10 dark:border-white/10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
                       <span className={clsx('text-[10px] leading-none font-medium', isCurrentHour ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-200')}>
                         {format(new Date().setHours(hour, 0, 0, 0), 'HH:mm')}
                       </span>
+                      {precipKind && (
+                        <span
+                          className="text-[9px] leading-none"
+                          role="img"
+                          aria-label={precipKind === 'snow' ? 'Snow this hour' : 'Rain this hour'}
+                        >
+                          {precipRunEmoji(precipKind)}
+                        </span>
+                      )}
                     </div>
 
                     {/* Events column — tap to create an event at this hour */}
@@ -807,6 +1029,15 @@ const Calendar: React.FC<CalendarProps> = ({
                         onCreateEvent(eventDate);
                       }}
                     >
+                      {/* Precipitation in this exact hour — same hatch as week view. */}
+                      {precipKind && (
+                        <div
+                          className="absolute inset-0 pointer-events-none"
+                          aria-hidden="true"
+                          style={precipHatchStyle(precipKind, theme)}
+                        />
+                      )}
+
                       {/* Current time indicator */}
                       {isCurrentHour && (
                         <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 h-0.5 bg-blue-500 z-10">
@@ -896,7 +1127,7 @@ const Calendar: React.FC<CalendarProps> = ({
         {Array.from(groups.entries()).map(([key, dayEvents]) => {
           const date = new Date(key);
           const todayDate = isToday(date);
-          const dayWeather = getDayWeather(date);
+          const dayWeather = getDaySummary(date);
           return (
             <div key={key} className="flex">
               {/* Date column */}
@@ -909,12 +1140,21 @@ const Calendar: React.FC<CalendarProps> = ({
                 </div>
                 {todayDate && <div className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">Today</div>}
                 {dayWeather && (
-                  <div className="flex items-center gap-0.5 text-[10px] leading-none text-gray-500 dark:text-gray-400 mt-1.5">
-                    <span>{dayWeather.emoji}</span>
-                    <span>{dayWeather.temp}°</span>
-                    {dayWeather.rainPercent > 0 && (
-                      <span className="text-blue-500 dark:text-blue-400 ml-0.5">💧{dayWeather.rainPercent}%</span>
-                    )}
+                  <div className="mt-1.5 text-[10px] leading-tight text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center gap-0.5">
+                      <span>{dayWeather.emoji}</span>
+                      <span className="font-medium text-gray-700 dark:text-gray-300">{dayWeather.high}°</span>
+                      <span className="opacity-70">/ {dayWeather.low}°</span>
+                    </div>
+                    {dayWeather.precipRuns.length > 0 ? (
+                      <div className="text-blue-500 dark:text-blue-400 mt-0.5">
+                        {dayWeather.precipRuns
+                          .map(run => `${precipRunEmoji(run.kind)}${formatPrecipRun(run)}`)
+                          .join(' ')}
+                      </div>
+                    ) : dayWeather.rainPercent > 0 ? (
+                      <div className="text-blue-500 dark:text-blue-400 mt-0.5">💧{dayWeather.rainPercent}%</div>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -952,13 +1192,15 @@ const Calendar: React.FC<CalendarProps> = ({
 
   return (
     <div className={clsx('flex flex-col h-full overflow-hidden', className)}>
-      <div className="px-4 py-3 flex-shrink-0">
+      <AmbientBackdrop colors={ambientColors} theme={theme} />
+
+      <div className="relative z-[1] px-4 py-3 flex-shrink-0">
         {renderHeader()}
       </div>
 
       <div
         className={clsx(
-          'flex-1 px-4 pb-2',
+          'relative z-[1] flex-1 px-4 pb-2',
           viewType === 'week' || viewType === 'day'
             ? 'overflow-hidden flex flex-col min-h-0'
             : 'overflow-auto'
